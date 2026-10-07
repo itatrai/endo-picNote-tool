@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Picture Ranges">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Picture Range Tool</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --text: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --field: #f1f5f9;
+    --btn: #e2e8f0;
+    --btn-text: #0f172a;
+    --accent: #2563eb;
+    --accent-light: #dbeafe;
+    --ok: #059669;
+    --ok-bg: #d1fae5;
+    --danger: #dc2626;
+    --danger-bg: #fee2e2;
+    --danger-text: #991b1b;
+    --err-bg: #fff1f1;
+    --bar-bg: rgba(255, 255, 255, 0.85);
+    --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #090d16;
+      --card: #131b2e;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --line: #1e293b;
+      --field: #0f172a;
+      --btn: #1e293b;
+      --btn-text: #f8fafc;
+      --accent: #3b82f6;
+      --accent-light: #1e3a8a;
+      --ok: #10b981;
+      --ok-bg: #064e3b;
+      --danger: #f87171;
+      --danger-bg: #451a1a;
+      --danger-text: #fca5a5;
+      --err-bg: #2a1515;
+      --bar-bg: rgba(19, 27, 46, 0.85);
+      --shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  /* --- HEADER & NAVIGATION --- */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: var(--bar-bg);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--line);
+    padding: calc(10px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .header-top h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .nav-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    background: var(--field);
+    padding: 3px;
+    border-radius: var(--radius-md);
+    gap: 4px;
+  }
+
+  .nav-tab {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 12px;
+    border-radius: calc(var(--radius-md) - 3px);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-height: 36px;
+  }
+
+  .nav-tab.active {
+    background: var(--card);
+    color: var(--text);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  }
+
+  #offlineBanner {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 6px 14px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  /* --- MAIN CONTENT LAYOUT --- */
+  main {
+    flex: 1;
+    max-width: 800px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 14px max(14px, env(safe-area-inset-right)) calc(100px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* --- CARDS & BUTTONS --- */
+  .card {
+    background: var(--card);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    margin-bottom: 14px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--line);
+  }
+
+  .section-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  button, .file-label {
+    border: 0;
+    border-radius: var(--radius-md);
+    min-height: 44px;
+    padding: 10px 16px;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--btn);
+    color: var(--btn-text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: transform 0.1s ease, filter 0.1s ease;
+  }
+
+  button:active, .file-label:active { transform: scale(0.98); filter: brightness(0.92); }
+  button:disabled { opacity: 0.5; transform: none; }
+
+  button.primary, .file-label.primary { background: var(--accent); color: #ffffff; }
+  button.success { background: var(--ok); color: #ffffff; }
+  button.danger { background: var(--danger-bg); color: var(--danger-text); }
+  button.icon { width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%; font-size: 18px; flex: none; }
+  button.link { background: none; color: var(--accent); padding: 0 6px; min-height: 36px; }
+
+  .toolbar > * { flex: 1 1 auto; }
+  input[type=file] { display: none; }
+
+  input[type=text], input[type=number], select {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 16px; /* Prevents auto-zoom on iOS Safari */
+    background: var(--field);
+    color: var(--text);
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  input[type=number] { text-align: center; }
+
+  .hint { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 8px 0 0; }
+  details.hint summary { cursor: pointer; font-weight: 500; }
+
+  .status { margin-top: 10px; font-size: 13px; line-height: 1.4; border-radius: var(--radius-md); padding: 10px; }
+  .status:empty { display: none; }
+  .status.ok { background: var(--ok-bg); color: var(--ok); }
+  .status.bad { background: var(--danger-bg); color: var(--danger-text); }
+
+  /* --- ADD ROW FORM --- */
+  .add-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .add-row input { flex: 1; }
+  .add-row button { flex: none; }
+
+  .summary-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0 4px 8px;
+  }
+
+  /* --- PART ROW & QUICK ROLL CONTROLS --- */
+  .part {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    transition: border-color 0.2s ease;
+  }
+
+  .part.has-error { border-color: var(--danger); background: var(--err-bg); }
+
+  .part-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .pn { font-weight: 700; font-size: 16px; word-break: break-all; }
+
+  .range-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .field-group { display: flex; flex-direction: column; gap: 4px; }
+  .field-group label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
+
+  /* Roll Stepper Widget */
+  .roll-container {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .roll-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .roll-stepper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--field);
+    padding: 3px;
+    border-radius: var(--radius-md);
+  }
+
+  .roll-btn {
+    min-height: 32px;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 13px;
+    border-radius: var(--radius-sm);
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+
+  .roll-btn.step-btn {
+    width: 32px;
+    padding: 0;
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .count-badge {
+    background: var(--accent-light);
+    color: var(--accent);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .error { color: var(--danger); font-size: 12px; margin-top: 6px; font-weight: 600; }
+  .empty { text-align: center; color: var(--muted); padding: 36px 12px; font-size: 15px; }
+
+  /* --- BOTTOM BAR & TOAST --- */
+  .sticky-actions {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 25;
+    background: var(--bar-bg);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--line);
+    padding: 10px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  .sticky-inner { max-width: 800px; margin: auto; display: flex; gap: 8px; }
+  .sticky-inner button { flex: 1; }
+
+  .toast {
+    position: fixed;
+    z-index: 40;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    max-width: calc(100% - 24px);
+    background: #0f172a;
+    color: #ffffff;
+    border-radius: var(--radius-md);
+    padding: 8px 12px 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+
+  .toast[hidden], #offlineBanner[hidden], .empty[hidden] { display: none; }
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="header-top">
+    <h1>📷 Picture Range Tool</h1>
+    <span id="headerBadge" class="count-badge">0 Parts</span>
+  </div>
+  <nav class="nav-tabs" role="tablist">
+    <button class="nav-tab active" data-tab="tab-input" role="tab">1. Number Input</button>
+    <button class="nav-tab" data-tab="tab-tools" role="tab">2. Import & Export</button>
+  </nav>
+</header>
+
+<div id="offlineBanner" hidden>Offline mode – working with local data.</div>
+
+<main>
+
+  <!-- TAB 1: NUMBER INPUT & RANGES -->
+  <section id="tab-input" class="tab-panel active" role="tabpanel">
+    <div class="card">
+      <form id="addForm" class="add-row" autocomplete="off">
+        <input id="addInput" type="text" placeholder="Add part number…"
+               enterkeyhint="done" autocapitalize="characters"
+               autocorrect="off" spellcheck="false" aria-label="New part number">
+        <button type="submit" class="primary">＋ Add</button>
+      </form>
+
+      <div class="summary-bar">
+        <span id="summaryText">0 Parts loaded</span>
+        <button id="autoBtn" class="link" style="font-size:12px;">⚡ Auto-sequence</button>
+      </div>
+
+      <div id="list"></div>
+      <div id="empty" class="empty">No part numbers loaded.<br>Add one above or go to <b>Import & Export</b>.</div>
+    </div>
+  </section>
+
+  <!-- TAB 2: IMPORT, EXPORT & TOOLS -->
+  <section id="tab-tools" class="tab-panel" role="tabpanel">
+    <div class="card">
+      <div class="section-title">Import Data</div>
+      <div class="toolbar">
+        <label class="file-label primary">
+          📄 Load File (Excel/CSV)
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.ods,.csv,.txt">
+        </label>
+        <button id="sampleBtn">Load Sample</button>
+        <button id="clearBtn" class="danger">Clear All</button>
+      </div>
+
+      <details class="hint">
+        <summary>Supported Headers</summary>
+        <p class="hint">
+          Automatically detects columns named Part Number, Part No, PN, OEM PN, Numéro de pièce, Référence pièce, etc.
+        </p>
+      </details>
+      <div id="fileStatus" class="status" role="status"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Export Options</div>
+      <div class="field-group" style="margin-bottom:12px;">
+        <label for="csvSep">CSV Separator</label>
+        <select id="csvSep" aria-label="CSV separator">
+          <option value=",">Comma ( , )</option>
+          <option value=";">Semicolon ( ; ) – FR/BE Excel</option>
+        </select>
+      </div>
+      <button id="validateBtn" style="width:100%; margin-bottom:10px;">✓ Validate Ranges</button>
+      <div id="validation" class="status" role="status"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- STICKY ACTION BAR -->
+<div class="sticky-actions">
+  <div class="sticky-inner">
+    <button id="txtBtn">Export TXT</button>
+    <button id="csvBtn">Export CSV</button>
+    <button id="xlsxBtn" class="primary">Export Excel</button>
+  </div>
+</div>
+
+<!-- TOAST NOTIFICATION -->
+<div id="toast" class="toast" role="status" hidden>
+  <span id="toastMsg"></span>
+  <button id="undoBtn" class="link" style="color:#60a5fa;">Undo</button>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================
+   CONFIG & STORAGE KEY (PRESERVED)
+   ========================================================= */
+
+const STORAGE_KEY = "pictureRangeTool.v1";
+const CSV_SEP_KEY = "pictureRangeTool.csvSep";
+const XLSX_URL    = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+
+const MAX_HEADER_SEARCH_ROWS = 100;
+const HEADER_DATA_LOOKAHEAD  = 10;
+const DELIMITER_CANDIDATES   = [";", ",", "\t", "|"];
+const SAMPLE_BYTES_FOR_DELIMITER = 64 * 1024;
+
+const $ = id => document.getElementById(id);
+
+let parts = []; // [{ pn, start: ""|int, end: ""|int, error? }]
+
+/* =========================================================
+   HELPERS & STORE
+   ========================================================= */
+
+const normalizePN = v => String(v ?? "").trim();
+const isInt = n => Number.isInteger(n);
+
+function toNum(v) {
+  if (v === "" || v == null) return "";
+  const n = Number(v);
+  return Number.isFinite(n) ? n : "";
+}
+
+function validRange(p) {
+  return isInt(p.start) && isInt(p.end) && p.start >= 1 && p.end >= p.start;
+}
+
+function pictureCount(p) {
+  return validRange(p) ? p.end - p.start + 1 : 0;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" }[c]
+  ));
+}
+
+function setStatus(id, msg, kind = "") {
+  const el = $(id);
+  el.textContent = msg;
+  el.className = "status " + kind;
+}
+
+const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, val) { try { localStorage.setItem(key, val); return true; } catch { return false; } }
+};
+
+/* =========================================================
+   TAB SYSTEM
+   ========================================================= */
+
+document.querySelectorAll(".nav-tab").forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    $(tab.dataset.tab).classList.add("active");
+  };
+});
+
+/* =========================================================
+   AUTO-CHAINING & SEQUENCE LOGIC
+   ========================================================= */
+
+/*
+  Applies auto-linking logic:
+  - Line 1: End = Start + 1 (unless count set)
+  - Subsequent lines: Start = Previous End + 1
+*/
+function recalculateChains(fromIndex = 0) {
+  for (let i = fromIndex; i < parts.length; i++) {
+    const current = parts[i];
+
+    // If it's the very first part and start is set, default end = start + 1 (if end is empty)
+    if (i === 0) {
+      if (isInt(current.start) && current.end === "") {
+        current.end = current.start + 1;
+      }
+    } else {
+      const prev = parts[i - 1];
+      if (isInt(prev.end)) {
+        const preserveCount = validRange(current) ? (current.end - current.start + 1) : 2;
+        current.start = prev.end + 1;
+        current.end = current.start + preserveCount - 1;
+      }
+    }
+  }
+}
+
+/* =========================================================
+   RENDERING
+   ========================================================= */
+
+function partHtml(p, i) {
+  const pn = escapeHtml(p.pn);
+  const count = pictureCount(p);
+
+  return `
+    <div class="part${p.error ? " has-error" : ""}" data-index="${i}">
+      <div class="part-head">
+        <span class="pn">${pn}</span>
+        <span class="count-badge">${count > 0 ? count + " pics" : "No range"}</span>
+        <button class="icon danger remove" aria-label="Remove ${pn}">×</button>
+      </div>
+
+      <div class="range-grid">
+        <div class="field-group">
+          <label>Start Picture</label>
+          <input type="number" min="1" step="1" inputmode="numeric" data-field="start"
+                 value="${p.start ?? ""}" aria-label="Start picture for ${pn}">
+        </div>
+        <div class="field-group">
+          <label>End Picture</label>
+          <input type="number" min="1" step="1" inputmode="numeric" data-field="end"
+                 value="${p.end ?? ""}" aria-label="End picture for ${pn}">
+        </div>
+      </div>
+
+      <div class="roll-container">
+        <span class="roll-label">⚡ Quick Roll:</span>
+        <div class="roll-stepper">
+          <button class="roll-btn step-btn" data-roll="-1">–</button>
+          <button class="roll-btn" data-roll="1">+1</button>
+          <button class="roll-btn" data-roll="2">+2</button>
+          <button class="roll-btn" data-roll="5">+5</button>
+          <button class="roll-btn" data-roll="10">+10</button>
+          <button class="roll-btn step-btn" data-roll="1">+</button>
+        </div>
+      </div>
+
+      ${p.error ? `<div class="error">${escapeHtml(p.error)}</div>` : ""}
+    </div>`;
+}
+
+function render() {
+  $("list").innerHTML = parts.map(partHtml).join("");
+  $("empty").hidden = parts.length > 0;
+  updateSummary();
+}
+
+function updateSummary() {
+  const count = parts.length;
+  $("headerBadge").textContent = `${count} Part${count === 1 ? "" : "s"}`;
+  if (!count) {
+    $("summaryText").textContent = "0 Parts loaded";
+    return;
+  }
+  const ready = parts.filter(validRange);
+  const pics = ready.reduce((n, p) => n + (p.end - p.start + 1), 0);
+  $("summaryText").textContent = `${count} parts · ${ready.length} complete · ${pics} total pics`;
+}
+
+/* =========================================================
+   AUTOSAVE & STORAGE
+   ========================================================= */
+
+let saveTimer = null;
+
+function saveNow() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  store.set(STORAGE_KEY, JSON.stringify(parts.map(({ pn, start, end }) => ({ pn, start, end }))));
+}
+
+function changed() {
+  updateSummary();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 400);
+}
+
+function loadSaved() {
+  const raw = store.get(STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    return arr
+      .filter(x => x && typeof x.pn === "string" && x.pn.trim())
+      .map(x => ({ pn: x.pn.trim(), start: toNum(x.start), end: toNum(x.end) }));
+  } catch { return null; }
+}
+
+window.addEventListener("pagehide", saveNow);
+document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
+
+/* =========================================================
+   UNDO & TOAST
+   ========================================================= */
+
+let undoSnapshot = null;
+let toastTimer = null;
+
+function showToast(msg, withUndo) {
+  $("toastMsg").textContent = msg;
+  $("undoBtn").hidden = !withUndo;
+  $("toast").hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 5000);
+}
+
+function hideToast() { $("toast").hidden = true; }
+
+function withUndo(message, fn) {
+  const snapshot = JSON.stringify(parts);
+  fn();
+  undoSnapshot = snapshot;
+  render();
+  changed();
+  showToast(message, true);
+}
+
+$("undoBtn").onclick = () => {
+  if (undoSnapshot == null) return;
+  parts = JSON.parse(undoSnapshot);
+  parts.forEach(p => delete p.error);
+  undoSnapshot = null;
+  $("validation").textContent = "";
+  render();
+  changed();
+  hideToast();
+};
+
+/* =========================================================
+   VALIDATION
+   ========================================================= */
+
+function validate({ scroll = true } = {}) {
+  parts.forEach(p => delete p.error);
+
+  if (!parts.length) {
+    setStatus("validation", "There are no part numbers to validate.", "bad");
+    render();
+    return false;
+  }
+
+  const seen = new Set();
+  for (const p of parts) {
+    const key = p.pn.toUpperCase();
+    if (seen.has(key)) p.error = "Duplicate part number";
+    seen.add(key);
+
+    if (!p.error) {
+      if (!isInt(p.start) || p.start < 1) p.error = "Invalid start number";
+      else if (!isInt(p.end) || p.end < 1) p.error = "Invalid end number";
+      else if (p.end < p.start) p.error = "End is smaller than start";
+    }
+  }
+
+  const ranges = parts.filter(validRange).sort((a, b) => a.start - b.start || a.end - b.end);
+  let owner = null;
+  for (const p of ranges) {
+    if (owner && p.start <= owner.end) {
+      p.error ||= `Picture range overlaps ${owner.pn}`;
+      owner.error ||= `Picture range overlaps ${p.pn}`;
+    }
+    if (!owner || p.end > owner.end) owner = p;
+  }
+
+  const errors = parts.filter(p => p.error).length;
+  render();
+
+  setStatus(
+    "validation",
+    errors ? `${errors} issue(s) found – please correct them.` : "✓ All ranges are valid.",
+    errors ? "bad" : "ok"
+  );
+
+  if (errors && scroll) {
+    document.querySelector(".part.has-error")?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  return errors === 0;
+}
+
+/* =========================================================
+   AUTO-FILL / AUTO-SEQUENCE
+   ========================================================= */
+
+function autoFill() {
+  if (!parts.length) return;
+  withUndo("Ranges auto-sequenced", () => {
+    let next = 1;
+    for (const p of parts) {
+      const count = validRange(p) ? p.end - p.start + 1 : 2;
+      p.start = next;
+      p.end = next + count - 1;
+      next = p.end + 1;
+    }
+  });
+}
+
+$("autoBtn").onclick = autoFill;
+
+/* =========================================================
+   EXPORTS & FILE DELIVERY
+   ========================================================= */
+
+let xlsxPromise = null;
+
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (!xlsxPromise) {
+    xlsxPromise = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = XLSX_URL;
+      s.crossOrigin = "anonymous";
+      s.onload = () => resolve(window.XLSX);
+      s.onerror = () => {
+        xlsxPromise = null;
+        reject(new Error("The Excel library could not be loaded offline."));
+      };
+      document.head.appendChild(s);
+    });
+  }
+  return xlsxPromise;
+}
+
+window.addEventListener("load", () => {
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1500));
+  idle(() => loadXLSX().catch(() => {}));
+});
+
+function exportRows() {
+  return parts.map(p => ({
+    "Part Number": p.pn,
+    "Start Picture": p.start,
+    "End Picture": p.end,
+    "Picture Count": validRange(p) ? p.end - p.start + 1 : 0
+  }));
+}
+
+function csvCell(v, sep) {
+  const s = String(v ?? "");
+  return (s.includes(sep) || /["\n\r]/.test(s)) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+async function deliver(blob, filename) {
+  const preferShare = matchMedia("(pointer: coarse)").matches;
+  if (preferShare && navigator.canShare && navigator.share) {
+    try {
+      const file = new File([blob], filename, { type: blob.type });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+    }
+  }
+  downloadBlob(blob, filename);
+}
+
+function exportTXT() {
+  if (!validate()) return;
+  const text = parts.map(p => `${p.pn};${p.start};${p.end}`).join("\n") + "\n";
+  deliver(new Blob([text], { type: "text/plain;charset=utf-8" }), "picture_ranges.txt");
+}
+
+function exportCSV() {
+  if (!validate()) return;
+  const sep = $("csvSep").value;
+  const rows = exportRows();
+  const header = Object.keys(rows[0]);
+  const csv = [header, ...rows.map(r => header.map(h => r[h]))]
+    .map(r => r.map(c => csvCell(c, sep)).join(sep))
+    .join("\r\n");
+  deliver(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }), "picture_ranges.csv");
+}
+
+async function exportXLSX() {
+  if (!validate()) return;
+  try {
+    const X = await loadXLSX();
+    const ws = X.utils.json_to_sheet(exportRows());
+    ws["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
+    const wb = X.utils.book_new();
+    X.utils.book_append_sheet(wb, ws, "Picture Ranges");
+    const out = X.write(wb, { bookType: "xlsx", type: "array" });
+    await deliver(
+      new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      "picture_ranges.xlsx"
+    );
+  } catch (err) {
+    setStatus("validation", err.message || "Excel export failed.", "bad");
+  }
+}
+
+/* =========================================================
+   INTERACTIVE LIST EVENTS (INPUTS & QUICK ROLL)
+   ========================================================= */
+
+const list = $("list");
+
+list.addEventListener("input", e => {
+  const field = e.target.dataset.field;
+  if (!field) return;
+
+  const card = e.target.closest(".part");
+  const index = +card.dataset.index;
+  const p = parts[index];
+  if (!p) return;
+
+  p[field] = toNum(e.target.value);
+
+  // Auto-chain remaining rows when start/end changes
+  if (field === "start" && index === 0 && p.end === "") {
+    p.end = isInt(p.start) ? p.start + 1 : "";
+  }
+  recalculateChains(index + 1);
+
+  render();
+  changed();
+});
+
+list.addEventListener("click", e => {
+  const card = e.target.closest(".part");
+  if (!card) return;
+  const index = +card.dataset.index;
+  const p = parts[index];
+
+  // Quick Roll Buttons
+  const rollBtn = e.target.closest("[data-roll]");
+  if (rollBtn && p) {
+    const delta = parseInt(rollBtn.dataset.roll, 10);
+    if (!isInt(p.start)) p.start = 1;
+
+    if (delta < 0 && isInt(p.end)) {
+      p.end = Math.max(p.start, p.end + delta);
+    } else {
+      if (!isInt(p.end)) p.end = p.start + 1;
+      else p.end += delta;
+    }
+
+    recalculateChains(index + 1);
+    render();
+    changed();
+    return;
+  }
+
+  // Remove row
+  const removeBtn = e.target.closest(".remove");
+  if (removeBtn && p) {
+    const pn = p.pn;
+    withUndo(`Removed ${pn}`, () => {
+      parts.splice(index, 1);
+      recalculateChains(index);
+    });
+  }
+});
+
+/* =========================================================
+   ADD ROW & BUTTON BINDINGS
+   ========================================================= */
+
+$("addForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const pn = normalizePN($("addInput").value);
+  if (!pn) return;
+
+  const newPart = { pn, start: "", end: "" };
+  parts.push(newPart);
+  recalculateChains(parts.length - 1);
+
+  $("addInput").value = "";
+  render();
+  changed();
+
+  list.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+$("sampleBtn").onclick = () => {
+  withUndo("Sample loaded", () => {
+    parts = [
+      { pn: "ABC123", start: 1,  end: 2  },
+      { pn: "ABC124", start: 3,  end: 5  },
+      { pn: "DEF456", start: 6,  end: 10 },
+      { pn: "XYZ789", start: 11, end: 14 }
+    ];
+  });
+  validate({ scroll: false });
+};
+
+$("clearBtn").onclick = () => {
+  if (!parts.length) return;
+  withUndo("List cleared", () => { parts = []; });
+  $("validation").textContent = "";
+};
+
+$("validateBtn").onclick = () => validate();
+$("txtBtn").onclick      = exportTXT;
+$("csvBtn").onclick      = exportCSV;
+$("xlsxBtn").onclick     = exportXLSX;
+
+$("csvSep").value = store.get(CSV_SEP_KEY) || ",";
+$("csvSep").onchange = () => store.set(CSV_SEP_KEY, $("csvSep").value);
+
+/* =========================================================
+   HEADER DETECTION & FILE IMPORT
+   ========================================================= */
+
+function stripAccents(s) {
+  return String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeHeader(value) {
+  return stripAccents(value).replace(/^\uFEFF/, "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function tokenizeHeader(value) {
+  return stripAccents(value).replace(/^\uFEFF/, "").trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+}
+
+const PN_HEADER_PATTERNS = [
+  ["customerpartnumber", 100],
+  ["customerpartno",      98],
+  ["partnumber",          95],
+  ["numerodepiece",       94],
+  ["numeropiece",         94],
+  ["referencepiece",      94],
+  ["partnumb",            92],
+  ["partnum",             90],
+  ["refpiece",            90],
+  ["ndepiece",            90],
+  ["npiece",              90],
+  ["partno",              88]
+];
+
+const SHORT_PN_RANK = 70;
+const EXCLUDED_PN_QUALIFIERS = ["sym", "symmetric", "symmetrical", "symetrique"];
+const SECONDARY_HEADER_KEYWORDS = new Map([
+  ["name", 3], ["title", 3], ["description", 3],
+  ["designation", 3], ["libelle", 3], ["nom", 3]
+]);
+
+function getPNHeaderMatch(value) {
+  const original   = String(value ?? "").trim();
+  const normalized = normalizeHeader(original);
+  const tokens     = tokenizeHeader(original);
+  if (!normalized) return null;
+
+  if (EXCLUDED_PN_QUALIFIERS.some(q => tokens.includes(q) || normalized.endsWith(q))) return null;
+
+  for (const [pattern, matchRank] of PN_HEADER_PATTERNS) {
+    if (normalized.endsWith(pattern)) return { original, normalized, pattern, matchRank };
+  }
+
+  if (tokens.length && tokens[tokens.length - 1] === "pn") {
+    return { original, normalized, pattern: "pn", matchRank: SHORT_PN_RANK };
+  }
+  return null;
+}
+
+function findPNColumnInfo(headers) {
+  if (!Array.isArray(headers)) return null;
+  let best = null;
+  headers.forEach((h, i) => {
+    const m = getPNHeaderMatch(h);
+    if (m && (!best || m.matchRank > best.matchRank)) best = { columnIndex: i, ...m };
+  });
+  return best;
+}
+
+function countPNValuesBelow(rows, headerIndex, pnColumn, lookAhead = HEADER_DATA_LOOKAHEAD) {
+  const end = Math.min(rows.length, headerIndex + 1 + lookAhead);
+  let count = 0;
+  for (let r = headerIndex + 1; r < end; r++) {
+    if (normalizePN((rows[r] || [])[pnColumn])) count++;
+  }
+  return count;
+}
+
+function scoreHeaderCandidate(rows, rowIndex) {
+  const row = rows[rowIndex];
+  if (!Array.isArray(row)) return null;
+
+  const pnMatch = findPNColumnInfo(row);
+  if (!pnMatch) return null;
+
+  let score = 10;
+  if (pnMatch.matchRank >= 90) score += 2;
+  else if (pnMatch.matchRank >= 80) score += 1;
+
+  const matchedKeywords = [];
+  const seen = new Set();
+  for (const cell of row) {
+    const key = normalizeHeader(cell);
+    if (SECONDARY_HEADER_KEYWORDS.has(key) && !seen.has(key)) {
+      seen.add(key);
+      score += SECONDARY_HEADER_KEYWORDS.get(key);
+      matchedKeywords.push(String(cell ?? "").trim());
+    }
+  }
+
+  const dataValues = countPNValuesBelow(rows, rowIndex, pnMatch.columnIndex);
+  score += dataValues;
+
+  return {
+    headerIndex: rowIndex,
+    pnColumn: pnMatch.columnIndex,
+    pnMatch, score, dataValues, matchedKeywords,
+    headers: row
+  };
+}
+
+function compareCandidates(a, b) {
+  return (a.score - b.score)
+      || (a.dataValues - b.dataValues)
+      || (a.pnMatch.matchRank - b.pnMatch.matchRank);
+}
+
+function findBestHeader(rows, maxRows = MAX_HEADER_SEARCH_ROWS) {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  let best = null;
+  const limit = Math.min(rows.length, maxRows);
+  for (let r = 0; r < limit; r++) {
+    const c = scoreHeaderCandidate(rows, r);
+    if (c && (!best || compareCandidates(c, best) > 0)) best = c;
+  }
+  return best;
+}
+
+function parseDelimited(text, delimiter) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  text = String(text ?? "").replace(/^\uFEFF/, "");
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') { field += '"'; i++; }
+      else inQuotes = !inQuotes;
+      continue;
+    }
+    if (ch === delimiter && !inQuotes) {
+      row.push(field.trim()); field = "";
+      continue;
+    }
+    if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field.trim()); rows.push(row);
+      row = []; field = "";
+      continue;
+    }
+    field += ch;
+  }
+  if (field.length || row.length) { row.push(field.trim()); rows.push(row); }
+  return rows;
+}
+
+function findBestDelimiter(sample) {
+  let best = null;
+  for (const delimiter of DELIMITER_CANDIDATES) {
+    const rows = parseDelimited(sample, delimiter);
+    const headerResult = findBestHeader(rows);
+    if (!headerResult) continue;
+
+    const cell = String(headerResult.headers[headerResult.pnColumn]);
+    if (DELIMITER_CANDIDATES.some(d => d !== delimiter && cell.includes(d))) continue;
+
+    const candidate = { delimiter, headerResult, columnCount: headerResult.headers.length };
+    if (!best) { best = candidate; continue; }
+    const diff = compareCandidates(candidate.headerResult, best.headerResult)
+              || (candidate.columnCount - best.columnCount);
+    if (diff > 0) best = candidate;
+  }
+  return best;
+}
+
+async function readTextFile(file) {
+  const buf = await file.arrayBuffer();
+  const b = new Uint8Array(buf.slice(0, 3));
+  if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder("utf-16le").decode(buf);
+  if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder("utf-16be").decode(buf);
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch { return new TextDecoder("windows-1252").decode(buf); }
+}
+
+function extractPartNumbers(rows, { headerIndex, pnColumn }) {
+  const out = [];
+  for (let r = headerIndex + 1; r < rows.length; r++) {
+    const pn = normalizePN((rows[r] || [])[pnColumn]);
+    if (pn) out.push({ pn, start: "", end: "" });
+  }
+  return out;
+}
+
+async function analyseCsv(file) {
+  const text = await readTextFile(file);
+  if (!text.trim()) throw new Error("The file is empty.");
+  const found = findBestDelimiter(text.slice(0, SAMPLE_BYTES_FOR_DELIMITER));
+  if (!found) return null;
+  const rows = parseDelimited(text, found.delimiter);
+  const headerResult = findBestHeader(rows);
+  return headerResult && { headerResult, rows, delimiter: found.delimiter };
+}
+
+async function analyseWorkbook(file) {
+  const X = await loadXLSX();
+  const wb = X.read(await file.arrayBuffer(), { type: "array" });
+  if (!wb.SheetNames || !wb.SheetNames.length) throw new Error("Workbook empty.");
+
+  const scanRows = MAX_HEADER_SEARCH_ROWS + HEADER_DATA_LOOKAHEAD;
+  let best = null;
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws || !ws["!ref"]) continue;
+    const full = X.utils.decode_range(ws["!ref"]);
+    const top = { s: full.s, e: { r: Math.min(full.e.r, full.s.r + scanRows - 1), c: full.e.c } };
+    const rows = X.utils.sheet_to_json(ws, { header: 1, defval: "", range: top });
+    const headerResult = findBestHeader(rows);
+
+    if (headerResult && (!best || compareCandidates(headerResult, best.headerResult) > 0)) {
+      best = { headerResult, sheetName };
+    }
+  }
+  if (!best) return null;
+
+  const rows = X.utils.sheet_to_json(wb.Sheets[best.sheetName], { header: 1, defval: "" });
+  return { headerResult: best.headerResult, rows, sheetName: best.sheetName };
+}
+
+$("fileInput").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  setStatus("fileStatus", "Analysing file…");
+
+  try {
+    const name = file.name.toLowerCase();
+    const isText = name.endsWith(".csv") || name.endsWith(".txt");
+    const result = isText ? await analyseCsv(file) : await analyseWorkbook(file);
+
+    if (!result) throw new Error("No recognized Part Number column found.");
+
+    const { headerResult, rows } = result;
+    const imported = extractPartNumbers(rows, headerResult);
+    if (!imported.length) throw new Error("Found column, but no part numbers.");
+
+    withUndo(`Imported ${imported.length} part number(s)`, () => {
+      parts = imported;
+      recalculateChains(0);
+    });
+
+    setStatus("fileStatus", `Successfully imported ${imported.length} part numbers.`, "ok");
+  } catch (err) {
+    setStatus("fileStatus", err.message || "Import failed.", "bad");
+  }
+
+  e.target.value = "";
+});
+
+/* =========================================================
+   OFFLINE & INIT
+   ========================================================= */
+
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+function updateOfflineBanner() { $("offlineBanner").hidden = navigator.onLine; }
+window.addEventListener("online",  updateOfflineBanner);
+window.addEventListener("offline", updateOfflineBanner);
+updateOfflineBanner();
+
+const saved = loadSaved();
+if (saved && saved.length) {
+  parts = saved;
+}
+render();
+</script>
+
+</body>
+</html>
