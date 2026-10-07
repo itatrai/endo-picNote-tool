@@ -252,6 +252,9 @@
     padding: 0 4px 8px;
   }
 
+  .first-picture-box { margin: 4px 0 14px; padding: 12px; background: var(--field); border: 1px solid var(--line); border-radius: var(--radius-md); }
+  .first-picture-help { color: var(--muted); font-size: 12px; line-height: 1.4; margin-top: 6px; }
+  button.num-field:disabled { opacity: 0.45; cursor: not-allowed; }
   /* --- PART ROW --- */
   .part {
     background: var(--card);
@@ -413,6 +416,34 @@
   }
 
   .toast[hidden], #offlineBanner[hidden], .empty[hidden] { display: none; }
+  /* --- EXPORT DIALOG --- */
+  .export-overlay {
+    position: fixed; inset: 0; z-index: 70;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    opacity: 0; transition: opacity 0.2s ease;
+  }
+  .export-overlay[hidden] { display: none; }
+  .export-overlay.show { opacity: 1; }
+  .export-dialog {
+    width: 100%; max-width: 440px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.30);
+    transform: scale(0.96);
+    transition: transform 0.2s ease;
+  }
+  .export-overlay.show .export-dialog { transform: scale(1); }
+  .export-format-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 16px; }
+  .export-format { background: var(--field); border: 1px solid var(--line); }
+  .export-format.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .export-dialog-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .export-dialog-actions button { flex: 1; }
+  .export-ext { color: var(--muted); font-size: 13px; margin-top: 6px; }
+
 </style>
 </head>
 
@@ -441,7 +472,17 @@
                enterkeyhint="done" autocapitalize="characters"
                autocorrect="off" spellcheck="false" aria-label="New part number">
         <button type="submit" class="primary">＋ Add</button>
+        <button id="clearBtn" type="button" class="danger">Clear All</button>
       </form>
+
+      <div class="first-picture-box">
+        <div class="field-group">
+          <label for="firstFullPicture">First Full Picture Number</label>
+          <input id="firstFullPicture" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="14" placeholder="e.g. 320002541562" autocomplete="off" enterkeyhint="done">
+          <div class="first-picture-help">Enter 1 to 14 digits. The last 4 digits define the Start Picture of the first part. Picture range controls stay locked until this number is set.</div>
+          <div id="firstPictureStatus" class="status" role="status"></div>
+        </div>
+      </div>
 
       <div class="summary-bar">
         <span id="summaryText">0 Parts loaded</span>
@@ -462,7 +503,6 @@
           <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.ods,.csv,.txt">
         </label>
         <button id="sampleBtn">Load Sample</button>
-        <button id="clearBtn" class="danger">Clear All</button>
       </div>
 
       <details class="hint">
@@ -472,6 +512,10 @@
         </p>
       </details>
       <div id="fileStatus" class="status" role="status"></div>
+      <div id="duplicateActions" class="toolbar" style="margin-top:10px;" hidden>
+        <button id="removeDuplicatesBtn" class="primary" type="button">Remove all duplicates</button>
+        <button id="keepDuplicatesBtn" type="button">Keep duplicates</button>
+      </div>
     </div>
 
     <div class="card">
@@ -493,9 +537,28 @@
 <!-- STICKY ACTION BAR -->
 <div class="sticky-actions">
   <div class="sticky-inner">
-    <button id="txtBtn">Export TXT</button>
-    <button id="csvBtn">Export CSV</button>
-    <button id="xlsxBtn" class="primary">Export Excel</button>
+    <button id="exportBtn" class="primary">Export</button>
+  </div>
+</div>
+
+<!-- EXPORT DIALOG -->
+<div id="exportOverlay" class="export-overlay" hidden>
+  <div class="export-dialog" role="dialog" aria-modal="true" aria-labelledby="exportDialogTitle">
+    <div id="exportDialogTitle" class="section-title">Export Picture Ranges</div>
+    <div class="field-group">
+      <label for="exportFilename">File Name</label>
+      <input id="exportFilename" type="text" value="picture_ranges" autocomplete="off" autocorrect="off" spellcheck="false">
+      <div id="exportExtension" class="export-ext">File will be saved as picture_ranges.xlsx</div>
+    </div>
+    <div class="export-format-grid" aria-label="Export format">
+      <button type="button" class="export-format" data-format="txt">TXT</button>
+      <button type="button" class="export-format" data-format="csv">CSV</button>
+      <button type="button" class="export-format active" data-format="xlsx">Excel</button>
+    </div>
+    <div class="export-dialog-actions">
+      <button id="exportCancelBtn" type="button">Cancel</button>
+      <button id="exportConfirmBtn" type="button" class="primary">Export</button>
+    </div>
   </div>
 </div>
 
@@ -538,6 +601,7 @@
 
 const STORAGE_KEY = "pictureRangeTool.v1";
 const CSV_SEP_KEY = "pictureRangeTool.csvSep";
+const FIRST_PICTURE_KEY = "pictureRangeTool.firstFullPicture";
 const XLSX_URL    = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
 
 const MAX_HEADER_SEARCH_ROWS = 100;
@@ -548,6 +612,7 @@ const SAMPLE_BYTES_FOR_DELIMITER = 64 * 1024;
 const $ = id => document.getElementById(id);
 
 let parts = []; // [{ pn, start: ""|int, end: ""|int, error? }]
+let firstFullPicture = "";
 
 /* =========================================================
    HELPERS & STORE
@@ -599,6 +664,36 @@ document.querySelectorAll(".nav-tab").forEach(tab => {
     $(tab.dataset.tab).classList.add("active");
   };
 });
+
+/* =========================================================
+   FIRST FULL PICTURE NUMBER
+   ========================================================= */
+function firstPictureReady() { return /^[0-9]{1,14}$/.test(firstFullPicture); }
+function firstShortPictureNumber() { return firstPictureReady() ? parseInt(firstFullPicture.slice(-4), 10) : null; }
+function formatShortPictureNumber(value) { return isInt(value) ? String(value).padStart(4, "0") : ""; }
+function fullPictureNumber(value) { if (!firstPictureReady() || !isInt(value)) return ""; return firstFullPicture.slice(0, -4) + formatShortPictureNumber(value); }
+function seedRangesFromFirstPicture() {
+  if (!firstPictureReady() || !parts.length) return;
+  const cnt = rangeCount(parts[0]);
+  parts[0].start = firstShortPictureNumber();
+  parts[0].end = parts[0].start + cnt - 1;
+  parts[0]._cnt = cnt;
+  recalculateChains(1);
+}
+function applyFirstPictureNumber(value) {
+  firstFullPicture = String(value ?? "").replace(/\D/g, "").slice(0, 14);
+  $("firstFullPicture").value = firstFullPicture;
+  store.set(FIRST_PICTURE_KEY, firstFullPicture);
+  parts.forEach(p => { delete p.error; delete p.warn; });
+  if (!firstPictureReady()) {
+    parts.forEach(p => { p.start = ""; p.end = ""; });
+    setStatus("firstPictureStatus", "Enter the first full picture number to unlock the picture ranges.", "warn");
+  } else {
+    seedRangesFromFirstPicture();
+    setStatus("firstPictureStatus", `First Start Picture = ${formatShortPictureNumber(firstShortPictureNumber())} (last 4 digits of ${firstFullPicture}).`, "ok");
+  }
+  render(); changed();
+}
 
 /* =========================================================
    AUTO-CHAINING & SEQUENCE LOGIC
@@ -657,13 +752,13 @@ function partHtml(p, i) {
       <div class="range-grid">
         <div class="field-group">
           <span class="lbl">Start Picture</span>
-          <button type="button" class="num-field${isInt(p.start) ? "" : " is-empty"}" data-field="start"
-                  aria-label="Start picture for ${pn}, tap to change">${isInt(p.start) ? p.start : "–"}</button>
+          <button type="button" class="num-field${isInt(p.start) ? "" : " is-empty"}" data-field="start" ${firstPictureReady() ? "" : "disabled"}
+                  aria-label="Start picture for ${pn}, tap to change">${isInt(p.start) ? formatShortPictureNumber(p.start) : "–"}</button>
         </div>
         <div class="field-group">
           <span class="lbl">End Picture</span>
-          <button type="button" class="num-field${isInt(p.end) ? "" : " is-empty"}" data-field="end"
-                  aria-label="End picture for ${pn}, tap to change">${isInt(p.end) ? p.end : "–"}</button>
+          <button type="button" class="num-field${isInt(p.end) ? "" : " is-empty"}" data-field="end" ${firstPictureReady() ? "" : "disabled"}
+                  aria-label="End picture for ${pn}, tap to change">${isInt(p.end) ? formatShortPictureNumber(p.end) : "–"}</button>
         </div>
       </div>
 
@@ -765,6 +860,7 @@ $("undoBtn").onclick = () => {
    ========================================================= */
 
 function validate({ scroll = true } = {}) {
+  if (!firstPictureReady()) { setStatus("validation", "Enter the first full picture number before validating or exporting.", "bad"); return false; }
   parts.forEach(p => { delete p.error; delete p.warn; });
 
   if (!parts.length) {
@@ -861,8 +957,8 @@ window.addEventListener("load", () => {
 function exportRows() {
   return parts.map(p => ({
     "Part Number": p.pn,
-    "Start Picture": p.start,
-    "End Picture": p.end,
+    "Start Picture": fullPictureNumber(p.start),
+    "End Picture": fullPictureNumber(p.end),
     "Picture Count": validRange(p) ? p.end - p.start + 1 : 0
   }));
 }
@@ -897,13 +993,13 @@ async function deliver(blob, filename) {
   downloadBlob(blob, filename);
 }
 
-function exportTXT() {
+function exportTXT(baseName = "picture_ranges") {
   if (!validate()) return;
-  const text = parts.map(p => `${p.pn};${p.start};${p.end}`).join("\n") + "\n";
-  deliver(new Blob([text], { type: "text/plain;charset=utf-8" }), "picture_ranges.txt");
+  const text = parts.map(p => `${p.pn};${fullPictureNumber(p.start)};${fullPictureNumber(p.end)}`).join("\n") + "\n";
+  deliver(new Blob([text], { type: "text/plain;charset=utf-8" }), `${baseName}.txt`);
 }
 
-function exportCSV() {
+function exportCSV(baseName = "picture_ranges") {
   if (!validate()) return;
   const sep = $("csvSep").value;
   const rows = exportRows();
@@ -911,21 +1007,21 @@ function exportCSV() {
   const csv = [header, ...rows.map(r => header.map(h => r[h]))]
     .map(r => r.map(c => csvCell(c, sep)).join(sep))
     .join("\r\n");
-  deliver(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }), "picture_ranges.csv");
+  deliver(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }), `${baseName}.csv`);
 }
 
-async function exportXLSX() {
+async function exportXLSX(baseName = "picture_ranges") {
   if (!validate()) return;
   try {
     const X = await loadXLSX();
     const ws = X.utils.json_to_sheet(exportRows());
-    ws["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 14 }, { wch: 14 }];
+    ws["!cols"] = [{ wch: 24 }, { wch: 18 }, { wch: 18 }, { wch: 14 }];
     const wb = X.utils.book_new();
     X.utils.book_append_sheet(wb, ws, "Picture Ranges");
     const out = X.write(wb, { bookType: "xlsx", type: "array" });
     await deliver(
       new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-      "picture_ranges.xlsx"
+      `${baseName}.xlsx`
     );
   } catch (err) {
     setStatus("validation", err.message || "Excel export failed.", "bad");
@@ -937,7 +1033,7 @@ async function exportXLSX() {
    ========================================================= */
 
 const list = $("list");
-const MAX_PIC = 999999;
+const MAX_PIC = 9999;
 
 /* Update every card in place (no re-render, so nothing loses focus) */
 function syncCards() {
@@ -947,15 +1043,30 @@ function syncCards() {
     const c = cards[i];
     for (const f of ["start", "end"]) {
       const b = c.querySelector(`[data-field="${f}"]`);
-      const t = isInt(p[f]) ? String(p[f]) : "–";
+      const t = isInt(p[f]) ? formatShortPictureNumber(p[f]) : "–";
       if (b.textContent !== t) b.textContent = t;
       b.classList.toggle("is-empty", !isInt(p[f]));
+      b.disabled = !firstPictureReady();
     }
     const n = pictureCount(p);
     c.querySelector(".count-badge").textContent = n > 0 ? n + " pics" : "No range";
     c.classList.toggle("has-error", !!p.error);
     if (!p.error) c.querySelector(".error")?.remove();
-    if (!p.warn) c.querySelector(".warn-note")?.remove();
+
+    // Keep the gap warning in sync immediately while editing.
+    const oldWarn = c.querySelector(".warn-note");
+    if (p.warn) {
+      if (oldWarn) {
+        oldWarn.textContent = `⚠ ${p.warn}`;
+      } else {
+        const warn = document.createElement("div");
+        warn.className = "warn-note";
+        warn.textContent = `⚠ ${p.warn}`;
+        c.appendChild(warn);
+      }
+    } else {
+      oldWarn?.remove();
+    }
   });
   updateSummary();
   updatePickerInfo();
@@ -972,11 +1083,33 @@ function applyEdit(index, field, value) {
   $("validation").className = "status";
 
   if (field === "start") {
+    // A part may never start on a picture number already used by the previous part.
+    const prev = parts[index - 1];
+    const minStart = index > 0 && prev && isInt(prev.end) ? prev.end + 1 : 1;
+    if (isInt(v) && v < minStart) {
+      p.error = `Start Picture must be at least ${minStart}; the previous part ends at ${minStart - 1}.`;
+      syncCards();
+      setStatus("validation", p.error, "bad");
+      return false;
+    }
+
     // Moving the start shifts the whole range (count preserved) and everything after it
     const cnt = rangeCount(p);
     p._cnt = cnt;
     p.start = v;
     if (isInt(v)) p.end = v + cnt - 1;
+
+    // Warn immediately if this start leaves unused picture numbers after the previous part.
+    if (index > 0 && isInt(v)) {
+      const prev = parts[index - 1];
+      if (prev && isInt(prev.end) && v > prev.end + 1) {
+        const gap = v - prev.end - 1;
+        const span = gap === 1
+          ? `${prev.end + 1}`
+          : `${prev.end + 1}–${v - 1}`;
+        p.warn = `${gap} picture number${gap === 1 ? "" : "s"} unused (${span}) between ${prev.pn} and this part`;
+      }
+    }
   } else {
     p.end = v;
     if (validRange(p)) p._cnt = p.end - p.start + 1;
@@ -1008,7 +1141,7 @@ const wheel = (() => {
       const k = i - SIDE, v = base + k, d = k - frac, a = Math.abs(d);
       if (v < min || v > max) { n.style.visibility = "hidden"; return; }
       n.style.visibility = "visible";
-      n.textContent = v;
+      n.textContent = formatShortPictureNumber(v);
       n.style.transform = `translateY(${d * ITEM_H}px) rotateX(${-d * 18}deg) scale(${1 - a * 0.06})`;
       n.style.opacity = Math.max(0, 1 - a * 0.32);
       n.classList.toggle("sel", a < 0.5);
@@ -1123,7 +1256,7 @@ function setTyping(on) {
   $("pickerType").textContent = on ? "⇅ Roll instead" : "⌨︎ Type number";
   if (on) {
     const v = parts[picker.idx]?.[picker.field];
-    inp.value = isInt(v) ? v : "";
+    inp.value = isInt(v) ? formatShortPictureNumber(v) : "";
     inp.focus();           // must stay inside the tap handler so iOS opens the keyboard
     inp.select();
   } else {
@@ -1134,6 +1267,7 @@ function setTyping(on) {
 }
 
 function openPicker(idx, field) {
+  if (!firstPictureReady()) { $("firstFullPicture").focus(); return; }
   const p = parts[idx];
   if (!p) return;
   picker.idx = idx; picker.field = field; picker.snap = JSON.stringify(parts);
@@ -1149,7 +1283,11 @@ function openPicker(idx, field) {
 
   $("pickerTitle").textContent = field === "start" ? "Start picture" : "End picture";
   wheel.onChange(null);
-  wheel.setRange(field === "end" && isInt(p.start) ? p.start : 1, MAX_PIC);
+  const prev = parts[idx - 1];
+  const minValue = field === "end" && isInt(p.start)
+    ? p.start
+    : (field === "start" && idx > 0 && prev && isInt(prev.end) ? prev.end + 1 : 1);
+  wheel.setRange(minValue, MAX_PIC);
   wheel.set(p[field]);
   if (wheel.value() !== p[field]) applyEdit(idx, field, wheel.value());
   wheel.onChange(v => applyEdit(idx, field, v));
@@ -1191,6 +1329,19 @@ document.addEventListener("keydown", e => {
 $("pickerInput").addEventListener("input", e => {
   const digits = e.target.value.replace(/\D/g, "").slice(0, 6);
   if (e.target.value !== digits) e.target.value = digits;
+
+  if (picker.field === "start" && picker.idx > 0 && digits !== "") {
+    const prev = parts[picker.idx - 1];
+    const typed = parseInt(digits, 10);
+    if (prev && isInt(prev.end) && typed < prev.end + 1) {
+      const msg = `Start Picture must be at least ${prev.end + 1}; the previous part ends at ${prev.end}.`;
+      parts[picker.idx].error = msg;
+      syncCards();
+      setStatus("validation", msg, "bad");
+      return;
+    }
+  }
+
   applyEdit(picker.idx, picker.field, digits === "" ? "" : parseInt(digits, 10));
 });
 $("pickerInput").addEventListener("keydown", e => {
@@ -1227,7 +1378,10 @@ $("addForm").addEventListener("submit", e => {
 
   const newPart = { pn, start: "", end: "" };
   parts.push(newPart);
-  recalculateChains(parts.length - 1);
+  if (firstPictureReady()) {
+    if (parts.length === 1) seedRangesFromFirstPicture();
+    else recalculateChains(parts.length - 1);
+  }
 
   $("addInput").value = "";
   render();
@@ -1239,11 +1393,12 @@ $("addForm").addEventListener("submit", e => {
 $("sampleBtn").onclick = () => {
   withUndo("Sample loaded", () => {
     parts = [
-      { pn: "ABC123", start: 1,  end: 2  },
-      { pn: "ABC124", start: 3,  end: 5  },
-      { pn: "DEF456", start: 6,  end: 10 },
-      { pn: "XYZ789", start: 11, end: 14 }
+      { pn: "ABC123", start: "", end: "", _cnt: 2 },
+      { pn: "ABC124", start: "", end: "", _cnt: 3 },
+      { pn: "DEF456", start: "", end: "", _cnt: 5 },
+      { pn: "XYZ789", start: "", end: "", _cnt: 4 }
     ];
+    if (firstPictureReady()) seedRangesFromFirstPicture();
   });
   validate({ scroll: false });
 };
@@ -1251,13 +1406,73 @@ $("sampleBtn").onclick = () => {
 $("clearBtn").onclick = () => {
   if (!parts.length) return;
   withUndo("List cleared", () => { parts = []; });
+  firstFullPicture = ""; $("firstFullPicture").value = ""; store.set(FIRST_PICTURE_KEY, "");
+  setStatus("firstPictureStatus", "Enter the first full picture number to unlock the picture ranges.", "warn");
   $("validation").textContent = "";
 };
 
 $("validateBtn").onclick = () => validate();
-$("txtBtn").onclick      = exportTXT;
-$("csvBtn").onclick      = exportCSV;
-$("xlsxBtn").onclick     = exportXLSX;
+
+/* Export dialog: one entry point, selectable format and editable file name. */
+let exportFormat = "xlsx";
+const exportOverlay = $("exportOverlay");
+
+function cleanExportBaseName(value) {
+  let name = String(value || "").trim();
+  name = name.replace(/\.(txt|csv|xlsx)$/i, "");
+  // Remove characters that are invalid in common file systems while preserving spaces and useful punctuation.
+  name = name.replace(/[\/:*?"<>|]/g, "_").trim();
+  return name || "picture_ranges";
+}
+
+function updateExportDialog() {
+  document.querySelectorAll(".export-format").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.format === exportFormat);
+  });
+  const baseName = cleanExportBaseName($("exportFilename").value);
+  const ext = exportFormat === "xlsx" ? "xlsx" : exportFormat;
+  $("exportExtension").textContent = `File will be saved as ${baseName}.${ext}`;
+}
+
+function openExportDialog() {
+  exportFormat = "xlsx";
+  $("exportFilename").value = "picture_ranges";
+  updateExportDialog();
+  exportOverlay.hidden = false;
+  void exportOverlay.offsetWidth;
+  exportOverlay.classList.add("show");
+  setTimeout(() => $("exportFilename").select(), 80);
+}
+
+function closeExportDialog() {
+  exportOverlay.classList.remove("show");
+  setTimeout(() => { exportOverlay.hidden = true; }, 220);
+}
+
+$("exportBtn").onclick = openExportDialog;
+$("exportCancelBtn").onclick = closeExportDialog;
+$("exportFilename").addEventListener("input", updateExportDialog);
+
+document.querySelectorAll(".export-format").forEach(btn => {
+  btn.onclick = () => {
+    exportFormat = btn.dataset.format;
+    updateExportDialog();
+  };
+});
+
+exportOverlay.addEventListener("click", e => {
+  if (e.target === exportOverlay) closeExportDialog();
+});
+
+$("exportConfirmBtn").onclick = async () => {
+  const baseName = cleanExportBaseName($("exportFilename").value);
+  $("exportFilename").value = baseName;
+  updateExportDialog();
+  if (exportFormat === "txt") await exportTXT(baseName);
+  else if (exportFormat === "csv") await exportCSV(baseName);
+  else await exportXLSX(baseName);
+  closeExportDialog();
+};
 
 $("csvSep").value = store.get(CSV_SEP_KEY) || ",";
 $("csvSep").onchange = () => store.set(CSV_SEP_KEY, $("csvSep").value);
@@ -1489,10 +1704,44 @@ async function analyseWorkbook(file) {
   return { headerResult: best.headerResult, rows, sheetName: best.sheetName };
 }
 
+function getDuplicateInfo(items) {
+  const seen = new Set(), duplicateKeys = new Set();
+  let duplicateRows = 0;
+  for (const item of items) {
+    const key = normalizePN(item.pn).toUpperCase();
+    if (seen.has(key)) { duplicateRows++; duplicateKeys.add(key); }
+    else seen.add(key);
+  }
+  return { duplicateRows, duplicatePartNumbers: duplicateKeys.size };
+}
+function hideDuplicateActions() { $("duplicateActions").hidden = true; }
+function removeAllDuplicates() {
+  const seen = new Set(), unique = [];
+  let removed = 0;
+  for (const p of parts) {
+    const key = normalizePN(p.pn).toUpperCase();
+    if (seen.has(key)) { removed++; continue; }
+    seen.add(key); unique.push(p);
+  }
+  if (!removed) { hideDuplicateActions(); setStatus("fileStatus", "No duplicate part numbers remain.", "ok"); return; }
+  withUndo(`Removed ${removed} duplicate part number${removed === 1 ? "" : "s"}`, () => {
+    parts = unique;
+    if (firstPictureReady()) seedRangesFromFirstPicture();
+  });
+  hideDuplicateActions();
+  setStatus("fileStatus", `Removed ${removed} duplicate entr${removed === 1 ? "y" : "ies"}. ${parts.length} unique part number${parts.length === 1 ? "" : "s"} remain.`, "ok");
+}
+$("removeDuplicatesBtn").onclick = removeAllDuplicates;
+$("keepDuplicatesBtn").onclick = () => {
+  hideDuplicateActions();
+  setStatus("fileStatus", "Duplicates kept. They will still be flagged during final validation/export.", "warn");
+};
+
 $("fileInput").addEventListener("change", async e => {
   const file = e.target.files[0];
   if (!file) return;
 
+  hideDuplicateActions();
   setStatus("fileStatus", "Analysing file…");
 
   try {
@@ -1508,10 +1757,17 @@ $("fileInput").addEventListener("change", async e => {
 
     withUndo(`Imported ${imported.length} part number(s)`, () => {
       parts = imported;
-      recalculateChains(0);
+      if (firstPictureReady()) seedRangesFromFirstPicture();
     });
 
-    setStatus("fileStatus", `Successfully imported ${imported.length} part numbers.`, "ok");
+    const duplicateInfo = getDuplicateInfo(imported);
+    if (duplicateInfo.duplicateRows > 0) {
+      setStatus("fileStatus", `Imported ${imported.length} part numbers. ⚠ Found ${duplicateInfo.duplicateRows} duplicate entr${duplicateInfo.duplicateRows === 1 ? "y" : "ies"} across ${duplicateInfo.duplicatePartNumbers} repeated part number${duplicateInfo.duplicatePartNumbers === 1 ? "" : "s"}. Remove all duplicates?`, "warn");
+      $("duplicateActions").hidden = false;
+    } else {
+      hideDuplicateActions();
+      setStatus("fileStatus", `Successfully imported ${imported.length} part numbers. No duplicates found.`, "ok");
+    }
   } catch (err) {
     setStatus("fileStatus", err.message || "Import failed.", "bad");
   }
@@ -1532,9 +1788,25 @@ window.addEventListener("online",  updateOfflineBanner);
 window.addEventListener("offline", updateOfflineBanner);
 updateOfflineBanner();
 
+$("firstFullPicture").addEventListener("input", e => {
+  const digits = e.target.value.replace(/\D/g, "").slice(0, 14);
+  if (e.target.value !== digits) e.target.value = digits;
+  applyFirstPictureNumber(digits);
+});
+
 const saved = loadSaved();
 if (saved && saved.length) {
   parts = saved;
+}
+firstFullPicture = store.get(FIRST_PICTURE_KEY) || "";
+$("firstFullPicture").value = firstFullPicture;
+if (firstPictureReady()) {
+  seedRangesFromFirstPicture();
+  setStatus("firstPictureStatus", `First Start Picture = ${formatShortPictureNumber(firstShortPictureNumber())} (last 4 digits of ${firstFullPicture}).`, "ok");
+} else {
+  firstFullPicture = "";
+  parts.forEach(p => { p.start = ""; p.end = ""; });
+  setStatus("firstPictureStatus", "Enter the first full picture number to unlock the picture ranges.", "warn");
 }
 render();
 </script>
