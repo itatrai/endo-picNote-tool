@@ -31,6 +31,8 @@
     --danger: #dc2626;
     --danger-bg: #fee2e2;
     --danger-text: #991b1b;
+    --warn-bg: #fef3c7;
+    --warn-text: #92400e;
     --err-bg: #fff1f1;
     --bar-bg: rgba(255, 255, 255, 0.85);
     --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
@@ -56,6 +58,8 @@
       --danger: #f87171;
       --danger-bg: #451a1a;
       --danger-text: #fca5a5;
+      --warn-bg: #422006;
+      --warn-text: #fcd34d;
       --err-bg: #2a1515;
       --bar-bg: rgba(19, 27, 46, 0.85);
       --shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
@@ -229,6 +233,7 @@
   .status:empty { display: none; }
   .status.ok { background: var(--ok-bg); color: var(--ok); }
   .status.bad { background: var(--danger-bg); color: var(--danger-text); }
+  .status.warn { background: var(--warn-bg); color: var(--warn-text); }
 
   /* --- ADD ROW FORM --- */
   .add-row { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -320,7 +325,15 @@
   .picker-head .link:first-child { justify-self: start; }
   .picker-head .link:last-child { justify-self: end; font-weight: 700; }
   .picker-title { font-weight: 700; font-size: 16px; text-align: center; }
-  .picker-sub { text-align: center; color: var(--muted); font-size: 13px; margin: 2px 0 4px; word-break: break-all; }
+  .picker-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 4px; }
+  .picker-pn { font-size: 17px; font-weight: 700; word-break: break-all; min-width: 0; }
+  .picker-count {
+    flex: none; font-size: 24px; font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    background: var(--accent-light); color: var(--accent);
+    padding: 8px 16px; border-radius: 999px;
+  }
+  .picker-count.none { background: var(--field); color: var(--muted); font-size: 16px; font-weight: 600; }
 
   .picker-body { display: flex; flex-direction: column; justify-content: center; min-height: 220px; }
 
@@ -360,6 +373,8 @@
   }
 
   .error { color: var(--danger); font-size: 12px; margin-top: 6px; font-weight: 600; }
+  .warn-note { background: var(--warn-bg); color: var(--warn-text); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; font-weight: 600; margin-top: 8px; line-height: 1.4; }
+  [hidden] { display: none !important; }
   .empty { text-align: center; color: var(--muted); padding: 36px 12px; font-size: 15px; }
 
   /* --- BOTTOM BAR & TOAST --- */
@@ -430,7 +445,6 @@
 
       <div class="summary-bar">
         <span id="summaryText">0 Parts loaded</span>
-        <button id="autoBtn" class="link" style="font-size:12px;">⚡ Auto-sequence</button>
       </div>
 
       <div id="list"></div>
@@ -493,7 +507,10 @@
       <div id="pickerTitle" class="picker-title">Start picture</div>
       <button id="pickerDone" class="link" type="button">Done</button>
     </div>
-    <div id="pickerSub" class="picker-sub"></div>
+    <div class="picker-info">
+      <span id="pickerPn" class="picker-pn"></span>
+      <span id="pickerCount" class="picker-count"></span>
+    </div>
     <div class="picker-body">
       <div id="wheel" class="wheel" aria-label="Scroll to change the number">
         <div class="wheel-band"></div>
@@ -651,6 +668,7 @@ function partHtml(p, i) {
       </div>
 
       ${p.error ? `<div class="error">${escapeHtml(p.error)}</div>` : ""}
+      ${p.warn ? `<div class="warn-note">⚠ ${escapeHtml(p.warn)}</div>` : ""}
     </div>`;
 }
 
@@ -734,7 +752,7 @@ function withUndo(message, fn) {
 $("undoBtn").onclick = () => {
   if (undoSnapshot == null) return;
   parts = JSON.parse(undoSnapshot);
-  parts.forEach(p => delete p.error);
+  parts.forEach(p => { delete p.error; delete p.warn; });
   undoSnapshot = null;
   $("validation").textContent = "";
   render();
@@ -747,7 +765,7 @@ $("undoBtn").onclick = () => {
    ========================================================= */
 
 function validate({ scroll = true } = {}) {
-  parts.forEach(p => delete p.error);
+  parts.forEach(p => { delete p.error; delete p.warn; });
 
   if (!parts.length) {
     setStatus("validation", "There are no part numbers to validate.", "bad");
@@ -778,39 +796,38 @@ function validate({ scroll = true } = {}) {
     if (!owner || p.end > owner.end) owner = p;
   }
 
+  // Gaps between consecutive parts: allowed, but the user is told how many numbers stay unused
+  let gapTotal = 0, gapCount = 0;
+  for (let i = 1; i < parts.length; i++) {
+    const prev = parts[i - 1], cur = parts[i];
+    if (validRange(prev) && validRange(cur) && cur.start > prev.end + 1) {
+      const gap = cur.start - prev.end - 1;
+      gapTotal += gap; gapCount++;
+      const span = gap === 1 ? `${prev.end + 1}` : `${prev.end + 1}–${cur.start - 1}`;
+      cur.warn = `${gap} picture number${gap === 1 ? "" : "s"} unused (${span}) between ${prev.pn} and this part`;
+    }
+  }
+  const gapNote = gapTotal
+    ? `⚠ ${gapTotal} unused picture number${gapTotal === 1 ? "" : "s"} in ${gapCount} gap${gapCount === 1 ? "" : "s"} between parts.`
+    : "";
+
   const errors = parts.filter(p => p.error).length;
   render();
 
-  setStatus(
-    "validation",
-    errors ? `${errors} issue(s) found – please correct them.` : "✓ All ranges are valid.",
-    errors ? "bad" : "ok"
-  );
+  if (errors) {
+    setStatus("validation", `${errors} issue(s) found – please correct them.${gapNote ? " " + gapNote : ""}`, "bad");
+  } else if (gapNote) {
+    setStatus("validation", `✓ All ranges are valid. ${gapNote}`, "warn");
+  } else {
+    setStatus("validation", "✓ All ranges are valid.", "ok");
+  }
+  if (gapNote) showToast(gapNote, false);
 
   if (errors && scroll) {
     document.querySelector(".part.has-error")?.scrollIntoView({ block: "center", behavior: "smooth" });
   }
   return errors === 0;
 }
-
-/* =========================================================
-   AUTO-FILL / AUTO-SEQUENCE
-   ========================================================= */
-
-function autoFill() {
-  if (!parts.length) return;
-  withUndo("Ranges auto-sequenced", () => {
-    let next = 1;
-    for (const p of parts) {
-      const count = validRange(p) ? p.end - p.start + 1 : 2;
-      p.start = next;
-      p.end = next + count - 1;
-      next = p.end + 1;
-    }
-  });
-}
-
-$("autoBtn").onclick = autoFill;
 
 /* =========================================================
    EXPORTS & FILE DELIVERY
@@ -938,6 +955,7 @@ function syncCards() {
     c.querySelector(".count-badge").textContent = n > 0 ? n + " pics" : "No range";
     c.classList.toggle("has-error", !!p.error);
     if (!p.error) c.querySelector(".error")?.remove();
+    if (!p.warn) c.querySelector(".warn-note")?.remove();
   });
   updateSummary();
   updatePickerInfo();
@@ -949,7 +967,7 @@ function applyEdit(index, field, value) {
   if (!p) return;
   const v = toNum(value);
 
-  parts.forEach(q => delete q.error);          // old validation results are stale now
+  parts.forEach(q => { delete q.error; delete q.warn; });          // old validation results are stale now
   $("validation").textContent = "";
   $("validation").className = "status";
 
@@ -1092,7 +1110,10 @@ function updatePickerInfo() {
   const p = parts[picker.idx];
   if (!p) return;
   const n = pictureCount(p);
-  $("pickerSub").textContent = `${p.pn} · ${n > 0 ? n + " pics" : "No range"}`;
+  $("pickerPn").textContent = p.pn;
+  const c = $("pickerCount");
+  c.textContent = n > 0 ? `${n} pic${n === 1 ? "" : "s"}` : "No range";
+  c.classList.toggle("none", n === 0);
 }
 
 function setTyping(on) {
