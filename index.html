@@ -262,7 +262,7 @@
 
   .part {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     gap: 8px 14px;
     align-items: stretch;
     margin-bottom: 18px;
@@ -331,7 +331,7 @@
   .place .place-input:focus { outline: 2px solid var(--accent); background: var(--field); text-align: center; }
   .place .hash { margin-right: 1px; }
 
-  .pn { font-weight: 700; font-size: 15px; word-break: break-all; line-height: 1.25; padding: 0 2px; }
+  .pn { font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; line-height: 1.25; padding: 0; }
 
   .pblock-foot {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -340,6 +340,7 @@
   .pblock-foot button.icon { width: 42px; height: 42px; min-height: 42px; font-size: 20px; }
 
   /* Right column: Start picture above End picture. Never moves while parts are reordered. */
+  .range-col button.num-field { padding-left: 6px; padding-right: 6px; }
   .range-col { display: flex; flex-direction: column; justify-content: center; gap: 10px; min-width: 0; }
 
   .part > .error, .part > .warn-note { grid-column: 1 / -1; margin-top: 0; }
@@ -539,7 +540,7 @@
         <div class="field-group">
           <label for="firstFullPicture">First Full Picture Number</label>
           <input id="firstFullPicture" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="14" placeholder="e.g. 320002541562" autocomplete="off" enterkeyhint="done">
-          <div class="first-picture-help">Enter 1 to 14 digits. The last 4 digits define the Start Picture of the first part. Picture range controls stay locked until this number is set.</div>
+          <div id="firstPictureHelp" class="first-picture-help">Enter 1 to 14 digits. The last 4 digits define the Start Picture of the first part. Picture range controls stay locked until this number is set.</div>
           <div id="firstPictureStatus" class="status" role="status"></div>
         </div>
       </div>
@@ -839,8 +840,30 @@ function partHtml(p, i) {
     </div>`;
 }
 
+function updateFirstPictureHelp() {
+  const h = $("firstPictureHelp");
+  if (h) h.hidden = firstPictureReady();
+}
+
+/* Shrink each part number's font just enough to keep it on one line */
+const PN_MAX_FONT = 16, PN_MIN_FONT = 8;
+function fitPartNumbers() {
+  document.querySelectorAll("#list .pn").forEach(el => {
+    el.style.fontSize = PN_MAX_FONT + "px";
+    const avail = el.clientWidth;
+    if (!avail) return;                                   // tab hidden; refitted when shown
+    const need = el.scrollWidth;
+    if (need > avail) {
+      const size = Math.max(PN_MIN_FONT, Math.floor(PN_MAX_FONT * avail / need * 2) / 2);
+      el.style.fontSize = size + "px";
+    }
+  });
+}
+
 function render() {
+  updateFirstPictureHelp();
   $("list").innerHTML = parts.map(partHtml).join("");
+  fitPartNumbers();
   $("empty").hidden = parts.length > 0;
   updateSummary();
 }
@@ -886,6 +909,14 @@ function loadSaved() {
       .map(x => ({ pn: x.pn.trim(), start: toNum(x.start), end: toNum(x.end) }));
   } catch { return null; }
 }
+
+(() => {
+  let lastW = 0;
+  const refit = () => { const w = $("list").clientWidth; if (w !== lastW) { lastW = w; fitPartNumbers(); } };
+  if (window.ResizeObserver) new ResizeObserver(refit).observe($("list"));
+  window.addEventListener("resize", refit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitPartNumbers);
+})();
 
 window.addEventListener("pagehide", saveNow);
 document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
@@ -1732,6 +1763,7 @@ $("clearBtn").onclick = () => {
   firstFullPicture = ""; $("firstFullPicture").value = ""; store.set(FIRST_PICTURE_KEY, "");
   setStatus("firstPictureStatus", "Enter the first full picture number to unlock the picture ranges.", "warn");
   $("validation").textContent = "";
+  updateFirstPictureHelp();
 };
 
 $("validateBtn").onclick = () => validate();
