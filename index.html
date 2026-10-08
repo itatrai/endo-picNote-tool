@@ -21,6 +21,7 @@
     --text: #0f172a;
     --muted: #64748b;
     --line: #e2e8f0;
+    --block-border: #94a3b8;
     --field: #f1f5f9;
     --btn: #e2e8f0;
     --btn-text: #0f172a;
@@ -48,6 +49,7 @@
       --text: #f8fafc;
       --muted: #94a3b8;
       --line: #1e293b;
+      --block-border: #475569;
       --field: #0f172a;
       --btn: #1e293b;
       --btn-text: #f8fafc;
@@ -255,34 +257,92 @@
   .first-picture-box { margin: 4px 0 14px; padding: 12px; background: var(--field); border: 1px solid var(--line); border-radius: var(--radius-md); }
   .first-picture-help { color: var(--muted); font-size: 12px; line-height: 1.4; margin-top: 6px; }
   button.num-field:disabled { opacity: 0.45; cursor: not-allowed; }
-  /* --- PART ROW --- */
+  /* --- PART ROW: [ detachable part block | start/end column ] --- */
+  #list { padding-top: 14px; }
+
   .part {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    margin-bottom: 10px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-    transition: border-color 0.2s ease;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 14px;
+    align-items: stretch;
+    margin-bottom: 18px;
+    scroll-margin-top: 150px;
+    scroll-margin-bottom: 110px;
   }
 
-  .part.has-error { border-color: var(--danger); background: var(--err-bg); }
-
-  .part-head {
+  /* Detachable block (place number + part number + pics + remove) */
+  .pblock {
+    position: relative;
     display: flex;
-    align-items: center;
+    flex-direction: column;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 8px;
+    min-height: 128px;
+    padding: 24px 12px 12px;
+    background: var(--card);
+    border: 1.5px solid var(--block-border);
+    border-radius: 22px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
   }
-
-  .pn { font-weight: 700; font-size: 16px; word-break: break-all; }
-
-  .range-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+  .pblock.dragging {
+    z-index: 5;
+    cursor: grabbing;
+    transition: none !important;
+    border-color: var(--accent);
+    box-shadow: 0 14px 30px rgba(0,0,0,0.28);
   }
+  .pblock.shiftable { transition: transform 0.2s ease; }
+  .part.has-error .pblock { border-color: var(--danger); background: var(--err-bg); }
+  body.is-dragging, body.is-dragging * { user-select: none; -webkit-user-select: none; }
+
+  /* "#1" label sitting on the top border of the block */
+  .place {
+    position: absolute;
+    top: -15px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; align-items: center; justify-content: center;
+    background: inherit;
+    padding: 0 10px;
+    border-radius: 10px;
+    font-size: 20px; font-weight: 700;
+    color: var(--text);
+    cursor: text;
+    user-select: auto; -webkit-user-select: auto;
+  }
+  .place .place-input {
+    width: 2.6em;
+    min-height: 30px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    font-size: 20px;   /* >=16px so iOS does not zoom */
+    font-weight: 700;
+    text-align: left;
+    color: var(--text);
+    user-select: text; -webkit-user-select: text;
+  }
+  .place .place-input:focus { outline: 2px solid var(--accent); background: var(--field); text-align: center; }
+  .place .hash { margin-right: 1px; }
+
+  .pn { font-weight: 700; font-size: 15px; word-break: break-all; line-height: 1.25; padding: 0 2px; }
+
+  .pblock-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: auto;
+  }
+  .pblock-foot button.icon { width: 42px; height: 42px; min-height: 42px; font-size: 20px; }
+
+  /* Right column: Start picture above End picture. Never moves while parts are reordered. */
+  .range-col { display: flex; flex-direction: column; justify-content: center; gap: 10px; min-width: 0; }
+
+  .part > .error, .part > .warn-note { grid-column: 1 / -1; margin-top: 0; }
 
   .field-group { display: flex; flex-direction: column; gap: 4px; }
   .field-group label, .field-group .lbl { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
@@ -487,6 +547,7 @@
       <div class="summary-bar">
         <span id="summaryText">0 Parts loaded</span>
       </div>
+      <p class="hint" style="margin:-2px 4px 6px;">Hold a part block and drag it to reorder, or type a new # to move it. Start/End pictures stay in place.</p>
 
       <div id="list"></div>
       <div id="empty" class="empty">No part numbers loaded.<br>Add one above or go to <b>Import & Export</b>.</div>
@@ -737,27 +798,38 @@ function recalculateChains(fromIndex = 0) {
    RENDERING
    ========================================================= */
 
+let partIdSeq = 0;
+
 function partHtml(p, i) {
   const pn = escapeHtml(p.pn);
   const count = pictureCount(p);
+  p._id ||= ++partIdSeq;                       // runtime-only id, used to animate moves
+  const dis = firstPictureReady() ? "" : "disabled";
 
   return `
     <div class="part${p.error ? " has-error" : ""}" data-index="${i}">
-      <div class="part-head">
-        <span class="pn">${pn}</span>
-        <span class="count-badge">${count > 0 ? count + " pics" : "No range"}</span>
-        <button class="icon danger remove" aria-label="Remove ${pn}">×</button>
+      <div class="pblock" data-id="${p._id}">
+        <div class="place">
+          <span class="hash">#</span><input class="place-input" type="text" inputmode="numeric" pattern="[0-9]*"
+                 maxlength="4" value="${i + 1}" enterkeyhint="done" autocomplete="off"
+                 aria-label="Position of ${pn} in the list, type a new number to move it">
+        </div>
+        <div class="pn">${pn}</div>
+        <div class="pblock-foot">
+          <span class="count-badge">${count > 0 ? count + " pics" : "No range"}</span>
+          <button class="icon danger remove" aria-label="Remove ${pn}">×</button>
+        </div>
       </div>
 
-      <div class="range-grid">
+      <div class="range-col">
         <div class="field-group">
           <span class="lbl">Start Picture</span>
-          <button type="button" class="num-field${isInt(p.start) ? "" : " is-empty"}" data-field="start" ${firstPictureReady() ? "" : "disabled"}
+          <button type="button" class="num-field${isInt(p.start) ? "" : " is-empty"}" data-field="start" ${dis}
                   aria-label="Start picture for ${pn}, tap to change">${isInt(p.start) ? formatShortPictureNumber(p.start) : "–"}</button>
         </div>
         <div class="field-group">
           <span class="lbl">End Picture</span>
-          <button type="button" class="num-field${isInt(p.end) ? "" : " is-empty"}" data-field="end" ${firstPictureReady() ? "" : "disabled"}
+          <button type="button" class="num-field${isInt(p.end) ? "" : " is-empty"}" data-field="end" ${dis}
                   aria-label="End picture for ${pn}, tap to change">${isInt(p.end) ? formatShortPictureNumber(p.end) : "–"}</button>
         </div>
       </div>
@@ -1348,7 +1420,10 @@ $("pickerInput").addEventListener("keydown", e => {
   if (e.key === "Enter") { e.preventDefault(); closePicker(true); }
 });
 
+let suppressClickUntil = 0;
+
 list.addEventListener("click", e => {
+  if (Date.now() < suppressClickUntil) return;      // click that ends a drag
   const card = e.target.closest(".part");
   if (!card) return;
   const index = +card.dataset.index;
@@ -1365,6 +1440,254 @@ list.addEventListener("click", e => {
       recalculateChains(index);
     });
   }
+});
+
+/* =========================================================
+   REORDERING PART BLOCKS (drag, or type a new place number)
+   The Start/End column belongs to the POSITION, not to the part:
+   it never moves. Each part keeps its picture count, and the
+   ranges are re-chained from the first position (any gap that
+   existed between two positions is kept at that position).
+   ========================================================= */
+
+function reorderParts(from, to) {
+  const n = parts.length;
+  if (from === to || from < 0 || to < 0 || from >= n || to >= n) return false;
+
+  const start0 = parts[0].start;
+  const gaps = parts.map((p, i) =>
+    i > 0 && isInt(p.start) && isInt(parts[i - 1].end) ? Math.max(0, p.start - parts[i - 1].end - 1) : 0);
+  parts.forEach(p => { p._cnt = rangeCount(p); });
+
+  const [moved] = parts.splice(from, 1);
+  parts.splice(to, 0, moved);
+
+  parts.forEach(p => { delete p.error; delete p.warn; });
+  $("validation").textContent = "";
+  $("validation").className = "status";
+
+  if (isInt(start0)) {
+    let prevEnd = 0;
+    parts.forEach((p, i) => {
+      p.start = i === 0 ? start0 : prevEnd + 1 + gaps[i];
+      p.end = p.start + p._cnt - 1;
+      prevEnd = p.end;
+    });
+  }
+  return true;
+}
+
+/* Vertical centre of every part block, keyed by part id (for glide animations) */
+function measureBlocks() {
+  const m = new Map();
+  list.querySelectorAll(".pblock").forEach(b => {
+    const r = b.getBoundingClientRect();
+    m.set(b.dataset.id, r.top + r.height / 2);
+  });
+  return m;
+}
+
+/* After a re-render, make every part block glide from where it was to where it is now */
+function playFlip(first, topId) {
+  const moving = [];
+  list.querySelectorAll(".pblock").forEach(b => {
+    const f = first.get(b.dataset.id);
+    if (f == null) return;
+    const r = b.getBoundingClientRect();
+    const dy = f - (r.top + r.height / 2);
+    if (Math.abs(dy) < 1) return;
+    b.style.transition = "none";
+    b.style.transform = `translateY(${dy}px)`;
+    if (String(topId) === b.dataset.id) b.style.zIndex = 5;
+    moving.push(b);
+  });
+  if (!moving.length) return;
+  void list.offsetHeight;
+  requestAnimationFrame(() => {
+    moving.forEach(b => {
+      b.style.transition = "transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)";
+      b.style.transform = "";
+    });
+  });
+  setTimeout(() => moving.forEach(b => { b.style.transition = ""; b.style.zIndex = ""; }), 400);
+}
+
+function moveWithAnimation(from, to) {
+  const p = parts[from];
+  if (!p) return;
+  const first = measureBlocks();
+  const id = p._id;
+  withUndo(`Moved ${p.pn} to #${to + 1}`, () => reorderParts(from, to));
+  playFlip(first, id);
+}
+
+/* ---- Typing a new place number ---- */
+list.addEventListener("focusin", e => {
+  const inp = e.target.closest(".place-input");
+  if (!inp) return;
+  setTimeout(() => { try { inp.select(); inp.setSelectionRange(0, 99); } catch {} }, 0);
+});
+
+list.addEventListener("input", e => {
+  const inp = e.target.closest(".place-input");
+  if (!inp) return;
+  const digits = inp.value.replace(/\D/g, "").slice(0, 4);
+  if (inp.value !== digits) inp.value = digits;
+});
+
+list.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.closest(".place-input")) {
+    e.preventDefault();
+    e.target.blur();                                  // blur commits the change
+  }
+});
+
+list.addEventListener("change", e => {
+  const inp = e.target.closest(".place-input");
+  if (!inp) return;
+  const row = inp.closest(".part");
+  const from = +row.dataset.index;
+  let to = parseInt(inp.value, 10);
+  if (!Number.isFinite(to)) { inp.value = from + 1; return; }
+  to = Math.min(parts.length, Math.max(1, to)) - 1;
+  if (to === from) { inp.value = from + 1; return; }
+
+  moveWithAnimation(from, to);
+  const target = list.children[to];
+  if (target) target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+});
+
+list.addEventListener("focusout", e => {
+  const inp = e.target.closest(".place-input");
+  if (!inp || !inp.isConnected) return;
+  const row = inp.closest(".part");
+  if (row && inp.value === "") inp.value = +row.dataset.index + 1;
+});
+
+/* ---- Press-and-drag a block ---- */
+const DRAG_HOLD_MS = 260;     // touch: hold this long before the block detaches
+const DRAG_SLOP = 8;          // touch: moving more than this before the hold = normal scroll
+let press = null, drag = null;
+
+function cancelPress() {
+  if (press) { clearTimeout(press.timer); press = null; }
+}
+
+function startDrag() {
+  if (!press) return;
+  clearTimeout(press.timer);
+  const blocks = [...list.children].map(r => r.querySelector(".pblock"));
+  const sy = window.scrollY;
+  drag = {
+    id: press.id, from: press.idx, target: press.idx,
+    blocks,
+    tops: blocks.map(b => b.getBoundingClientRect().top + sy),
+    hs: blocks.map(b => b.offsetHeight),
+    y0: press.y, clientY: press.y, scroll0: sy, raf: 0
+  };
+  try { press.blk.setPointerCapture(press.id); } catch {}
+  press = null;
+  blocks.forEach((b, i) => b.classList.add(i === drag.from ? "dragging" : "shiftable"));
+  document.body.classList.add("is-dragging");
+  if (navigator.vibrate) navigator.vibrate(12);
+  updateDrag();
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+
+function updateDrag() {
+  const d = drag;
+  if (!d) return;
+  const dy = d.clientY - d.y0 + (window.scrollY - d.scroll0);
+  const from = d.from;
+  d.blocks[from].style.transform = `translateY(${dy}px) scale(1.03)`;
+
+  const centre = d.tops[from] + d.hs[from] / 2 + dy;
+  let target = from, best = Infinity;
+  d.tops.forEach((t, i) => {
+    const dist = Math.abs(t + d.hs[i] / 2 - centre);
+    if (dist < best) { best = dist; target = i; }
+  });
+  d.target = target;
+
+  d.blocks.forEach((b, j) => {
+    if (j === from) return;
+    let shift = 0;
+    if (from < target && j > from && j <= target) shift = d.tops[j - 1] - d.tops[j];
+    else if (from > target && j >= target && j < from) shift = d.tops[j + 1] - d.tops[j];
+    b.style.transform = shift ? `translateY(${shift}px)` : "";
+  });
+}
+
+function autoScroll() {
+  if (!drag) return;
+  const topEdge = document.querySelector("header").getBoundingClientRect().bottom + 30;
+  const botEdge = document.querySelector(".sticky-actions").getBoundingClientRect().top - 30;
+  const y = drag.clientY;
+  let v = 0;
+  if (y < topEdge) v = -Math.min(18, (topEdge - y) / 4 + 3);
+  else if (y > botEdge) v = Math.min(18, (y - botEdge) / 4 + 3);
+  if (v) { window.scrollBy(0, v); updateDrag(); }
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+
+function finishDrag(cancelled) {
+  const d = drag;
+  if (!d) return;
+  drag = null;
+  cancelAnimationFrame(d.raf);
+  document.body.classList.remove("is-dragging");
+  suppressClickUntil = Date.now() + 400;
+
+  const first = measureBlocks();                      // positions at the moment of release
+  d.blocks.forEach(b => { b.style.transform = ""; b.classList.remove("dragging", "shiftable"); });
+
+  const p = parts[d.from];
+  if (cancelled || !p || d.target === d.from) { playFlip(first); return; }
+
+  const id = p._id;
+  withUndo(`Moved ${p.pn} to #${d.target + 1}`, () => reorderParts(d.from, d.target));
+  playFlip(first, id);
+}
+
+list.addEventListener("pointerdown", e => {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  if (drag || picker.idx >= 0) return;
+  const blk = e.target.closest(".pblock");
+  if (!blk || e.target.closest(".remove, .place")) return;
+  cancelPress();
+  press = {
+    id: e.pointerId, x: e.clientX, y: e.clientY, blk,
+    idx: +blk.closest(".part").dataset.index,
+    type: e.pointerType, timer: 0
+  };
+  if (e.pointerType !== "mouse") press.timer = setTimeout(startDrag, DRAG_HOLD_MS);
+});
+
+window.addEventListener("pointermove", e => {
+  if (drag) {
+    if (e.pointerId === drag.id) { drag.clientY = e.clientY; updateDrag(); }
+    return;
+  }
+  if (press && e.pointerId === press.id) {
+    const dist = Math.hypot(e.clientX - press.x, e.clientY - press.y);
+    if (press.type === "mouse") { if (dist > 4) startDrag(); }
+    else if (dist > DRAG_SLOP) cancelPress();         // the finger is scrolling the page
+  }
+});
+
+window.addEventListener("pointerup", e => {
+  if (drag && e.pointerId === drag.id) finishDrag(false);
+  else if (press && e.pointerId === press.id) cancelPress();
+});
+window.addEventListener("pointercancel", e => {
+  if (drag && e.pointerId === drag.id) finishDrag(true);
+  else if (press && e.pointerId === press.id) cancelPress();
+});
+
+/* Once a block is detached, the page must not scroll under the finger */
+document.addEventListener("touchmove", e => { if (drag && e.cancelable) e.preventDefault(); }, { passive: false });
+list.addEventListener("contextmenu", e => {
+  if (e.target.closest(".pblock") && !e.target.closest(".place")) e.preventDefault();
 });
 
 /* =========================================================
