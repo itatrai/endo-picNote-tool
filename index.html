@@ -9,7 +9,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Picture Ranges">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Picture Range Tool</title>
+<title>Picture Range Tool V11</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -207,6 +207,13 @@
   button.success { background: var(--ok); color: #ffffff; }
   button.danger { background: var(--danger-bg); color: var(--danger-text); }
   button.icon { width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%; font-size: 18px; flex: none; }
+  button.icon.camera { background: var(--accent-light); color: var(--accent); }
+  button.icon.camera.uploading { animation: cameraPulse 1s ease-in-out infinite; }
+  @keyframes cameraPulse { 50% { transform: scale(0.9); opacity: 0.65; } }
+  .camera-status { font-size: 11px; color: var(--muted); text-align: center; min-height: 14px; margin-top: -4px; }
+  .onedrive-card .toolbar > * { flex: 1 1 180px; }
+  .onedrive-status-line { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; }
+  .onedrive-account { min-width:0; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   button.link { background: none; color: var(--accent); padding: 0 6px; min-height: 36px; }
 
   .toolbar > * { flex: 1 1 auto; }
@@ -580,6 +587,33 @@
       </div>
     </div>
 
+    <div class="card onedrive-card">
+      <div class="section-title">OneDrive Picture Storage</div>
+      <div class="field-group" style="margin-bottom:12px;">
+        <label for="oneDriveFolder">OneDrive picture folder</label>
+        <input id="oneDriveFolder" type="text" placeholder="e.g. Picture Notes/Parts" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="hint">The app creates one subfolder per part number. Example: <b>Picture Notes/Parts/ABC123/</b></div>
+      </div>
+      <div class="field-group" style="margin-bottom:12px;">
+        <label for="oneDriveClientId">Microsoft App (Client) ID</label>
+        <input id="oneDriveClientId" type="text" placeholder="Paste the Application (client) ID from Microsoft Entra" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="hint">This is the public client ID of your Microsoft Entra SPA registration. No client secret is stored in the app.</div>
+      </div>
+      <div class="toolbar">
+        <button id="oneDriveSaveBtn" type="button">💾 Save Settings</button>
+        <button id="oneDriveConnectBtn" type="button" class="primary">☁ Connect OneDrive</button>
+        <button id="oneDriveDisconnectBtn" type="button" hidden>Disconnect</button>
+      </div>
+      <div class="onedrive-status-line">
+        <div id="oneDriveAccount" class="onedrive-account">Not connected</div>
+      </div>
+      <div id="oneDriveStatus" class="status" role="status"></div>
+      <details class="hint">
+        <summary>How the folder structure works</summary>
+        <p class="hint">Each camera press uploads a new image. Existing part folders are reused, so all photos for the same part number stay together.</p>
+      </details>
+    </div>
+
     <div class="card">
       <div class="section-title">Export Options</div>
       <div class="field-group" style="margin-bottom:12px;">
@@ -654,6 +688,9 @@
   <button id="undoBtn" class="link" style="color:#60a5fa;">Undo</button>
 </div>
 
+<!-- iPhone camera/file input. The camera button triggers this directly from the user's tap. -->
+<input id="cameraInput" type="file" accept="image/*" capture="environment">
+
 <script>
 "use strict";
 
@@ -664,6 +701,10 @@
 const STORAGE_KEY = "pictureRangeTool.v1";
 const CSV_SEP_KEY = "pictureRangeTool.csvSep";
 const FIRST_PICTURE_KEY = "pictureRangeTool.firstFullPicture";
+const ONEDRIVE_FOLDER_KEY = "pictureRangeTool.oneDriveFolder";
+const ONEDRIVE_CLIENT_KEY = "pictureRangeTool.oneDriveClientId";
+const ONEDRIVE_SCOPES = ["Files.ReadWrite"];
+const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 const XLSX_URL    = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
 
 const MAX_HEADER_SEARCH_ROWS = 100;
@@ -796,6 +837,273 @@ function recalculateChains(fromIndex = 0) {
 }
 
 /* =========================================================
+   ONEDRIVE + CAMERA V11
+   ========================================================= */
+
+let msalInstance = null;
+let oneDriveAccount = null;
+let activeCameraPartIndex = -1;
+let uploadBusy = false;
+
+function oneDriveFolderPath() {
+  return String($('oneDriveFolder')?.value || '').trim().replace(/^\/+|\/+$/g, '').replace(/\\/g, '/');
+}
+function safeDriveSegment(value) {
+  return String(value ?? '').trim().replace(/["*:<>?\\/|#%]/g, '_').replace(/\s+/g, ' ').trim() || 'Unnamed Part';
+}
+function encodeGraphPath(path) {
+  return String(path).split('/').filter(Boolean).map(encodeURIComponent).join('/');
+}
+function saveOneDriveSettings() {
+  const folder = oneDriveFolderPath();
+  const clientId = String($('oneDriveClientId').value || '').trim();
+  store.set(ONEDRIVE_FOLDER_KEY, folder);
+  store.set(ONEDRIVE_CLIENT_KEY, clientId);
+  $('oneDriveFolder').value = folder;
+  $('oneDriveClientId').value = clientId;
+  setStatus('oneDriveStatus', 'OneDrive settings saved on this device.', 'ok');
+}
+function loadOneDriveSettings() {
+  $('oneDriveFolder').value = store.get(ONEDRIVE_FOLDER_KEY) || '';
+  $('oneDriveClientId').value = store.get(ONEDRIVE_CLIENT_KEY) || '';
+}
+function setCameraStatus(index, msg, kind = '') {
+  const card = list.children[index];
+  if (!card) return;
+  const el = card.querySelector('[data-camera-status]');
+  if (el) { el.textContent = msg; el.style.color = kind === 'bad' ? 'var(--danger)' : kind === 'ok' ? 'var(--ok)' : 'var(--muted)'; }
+}
+function setCameraBusy(index, busy) {
+  const card = list.children[index];
+  const btn = card?.querySelector('.camera');
+  if (btn) btn.classList.toggle('uploading', busy);
+}
+function ensureMsal() {
+  const clientId = String($('oneDriveClientId')?.value || '').trim();
+  if (!clientId) throw new Error('Enter the Microsoft App (Client) ID on the Import & Export page first.');
+  if (!window.msal?.PublicClientApplication) throw new Error('Microsoft authentication library could not be loaded. Check your internet connection.');
+  if (!msalInstance || msalInstance.config?.auth?.clientId !== clientId) {
+    msalInstance = new msal.PublicClientApplication({
+      auth: {
+        clientId,
+        authority: 'https://login.microsoftonline.com/common',
+        redirectUri: window.location.href.split('#')[0]
+      },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true }
+    });
+  }
+  return msalInstance;
+}
+async function getGraphToken(interactive = false) {
+  const app = ensureMsal();
+  const accounts = app.getAllAccounts();
+  oneDriveAccount = accounts[0] || null;
+  if (!oneDriveAccount && interactive) {
+    const login = await app.loginPopup({ scopes: ONEDRIVE_SCOPES });
+    oneDriveAccount = login.account;
+  }
+  if (!oneDriveAccount) throw new Error('Connect OneDrive first.');
+  try {
+    const silent = await app.acquireTokenSilent({ scopes: ONEDRIVE_SCOPES, account: oneDriveAccount });
+    return silent.accessToken;
+  } catch (err) {
+    if (!interactive && (err?.name === 'InteractionRequiredAuthError' || /interaction|required|login/i.test(err?.errorCode || ''))) {
+      const interactiveResult = await app.acquireTokenPopup({ scopes: ONEDRIVE_SCOPES, account: oneDriveAccount });
+      return interactiveResult.accessToken;
+    }
+    if (interactive) {
+      const interactiveResult = await app.acquireTokenPopup({ scopes: ONEDRIVE_SCOPES, account: oneDriveAccount });
+      return interactiveResult.accessToken;
+    }
+    throw err;
+  }
+}
+async function graphFetch(path, options = {}, retryAuth = true) {
+  let token = await getGraphToken(false);
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${GRAPH_ROOT}${path}`, { ...options, headers });
+  if (response.status === 401 && retryAuth) {
+    token = await getGraphToken(true);
+    headers.set('Authorization', `Bearer ${token}`);
+    return fetch(`${GRAPH_ROOT}${path}`, { ...options, headers });
+  }
+  return response;
+}
+async function graphJson(path, options = {}, retryAuth = true) {
+  const response = await graphFetch(path, options, retryAuth);
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+  if (!response.ok) {
+    const message = data?.error?.message || text || `${response.status} ${response.statusText}`;
+    throw new Error(message);
+  }
+  return data;
+}
+async function getDriveItemByPath(path) {
+  const clean = String(path || '').replace(/^\/+|\/+$/g, '');
+  const endpoint = clean ? `/me/drive/root:/${encodeGraphPath(clean)}` : `/me/drive/root`;
+  const response = await graphFetch(endpoint, {}, true);
+  if (response.status === 404) return null;
+  const text = await response.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch {}
+  if (!response.ok) throw new Error(data?.error?.message || text || `OneDrive lookup failed (${response.status}).`);
+  return data;
+}
+async function createChildFolder(parentId, name) {
+  return graphJson(`/me/drive/items/${encodeURIComponent(parentId)}/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      folder: {},
+      '@microsoft.graph.conflictBehavior': 'fail'
+    })
+  });
+}
+async function ensureFolderPath(path) {
+  const segments = String(path || '').split('/').map(s => s.trim()).filter(Boolean);
+  let item = await getDriveItemByPath(segments.join('/'));
+  if (item?.folder) return item;
+  if (item && !item.folder) throw new Error(`OneDrive path exists but is not a folder: ${path}`);
+
+  let parent = await getDriveItemByPath('');
+  for (const segment of segments) {
+    const childPath = parent?.parentReference?.path
+      ? `${parent.parentReference.path.replace(/^\/drive\/root:?\/?/, '').replace(/^\/+|\/+$/g, '')}/${segment}`.replace(/^\//,'')
+      : segment;
+    const existing = await getDriveItemByPath(childPath);
+    if (existing?.folder) { parent = existing; continue; }
+    if (existing) throw new Error(`OneDrive item is not a folder: ${segment}`);
+    parent = await createChildFolder(parent.id, segment);
+  }
+  return parent;
+}
+async function ensurePartFolder(partNumber) {
+  const base = oneDriveFolderPath();
+  if (!base) throw new Error('Enter the OneDrive picture folder on the Import & Export page first.');
+  const partFolder = `${base}/${safeDriveSegment(partNumber)}`;
+  return ensureFolderPath(partFolder);
+}
+function extensionForFile(file) {
+  const name = String(file.name || '');
+  const m = name.match(/\.[A-Za-z0-9]+$/);
+  if (m) return m[0].toLowerCase();
+  if (file.type === 'image/png') return '.png';
+  if (file.type === 'image/webp') return '.webp';
+  if (file.type === 'image/heic') return '.heic';
+  return '.jpg';
+}
+async function uploadPhotoToOneDrive(file, partNumber) {
+  const folder = await ensurePartFolder(partNumber);
+  const now = new Date();
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const filename = `${safeDriveSegment(partNumber)}_${stamp}_${String(now.getMilliseconds()).padStart(3,'0')}${extensionForFile(file)}`;
+  const uploadPath = `/me/drive/items/${encodeURIComponent(folder.id)}:/${encodeURIComponent(filename)}:/content`;
+  const token = await getGraphToken(false);
+  let response = await fetch(`${GRAPH_ROOT}${uploadPath}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file
+  });
+  if (response.status === 401) {
+    const fresh = await getGraphToken(true);
+    response = await fetch(`${GRAPH_ROOT}${uploadPath}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${fresh}`, 'Content-Type': file.type || 'application/octet-stream' },
+      body: file
+    });
+  }
+  const text = await response.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch {}
+  if (!response.ok) throw new Error(data?.error?.message || text || `Upload failed (${response.status}).`);
+  return data;
+}
+async function connectOneDrive() {
+  saveOneDriveSettings();
+  try {
+    const token = await getGraphToken(true);
+    const me = await graphJson('/me?$select=displayName,userPrincipalName,mail', { headers: { Authorization: `Bearer ${token}` } }, false);
+    oneDriveAccount = ensureMsal().getAllAccounts()[0] || oneDriveAccount;
+    $('oneDriveAccount').textContent = me?.userPrincipalName || me?.mail || me?.displayName || 'Connected';
+    $('oneDriveConnectBtn').hidden = true; $('oneDriveDisconnectBtn').hidden = false;
+    setStatus('oneDriveStatus', '✓ OneDrive connected. Camera uploads are ready.', 'ok');
+    return true;
+  } catch (err) {
+    setStatus('oneDriveStatus', err.message || 'OneDrive connection failed.', 'bad');
+    return false;
+  }
+}
+async function disconnectOneDrive() {
+  try {
+    const app = ensureMsal();
+    const accounts = app.getAllAccounts();
+    for (const account of accounts) await app.logoutPopup({ account, mainWindowRedirectUri: window.location.href.split('#')[0] });
+  } catch {}
+  oneDriveAccount = null;
+  $('oneDriveAccount').textContent = 'Not connected';
+  $('oneDriveConnectBtn').hidden = false; $('oneDriveDisconnectBtn').hidden = true;
+  setStatus('oneDriveStatus', 'OneDrive disconnected. Settings were kept.', 'warn');
+}
+function openCameraForPart(index) {
+  if (uploadBusy) return;
+  const p = parts[index];
+  if (!p) return;
+  const folder = oneDriveFolderPath();
+  const clientId = String($('oneDriveClientId')?.value || '').trim();
+  if (!folder || !clientId) {
+    document.querySelector('[data-tab="tab-tools"]')?.click();
+    setStatus('oneDriveStatus', 'Set the OneDrive folder and Microsoft App (Client) ID first.', 'warn');
+    $('oneDriveFolder').focus();
+    return;
+  }
+  activeCameraPartIndex = index;
+  const input = $('cameraInput');
+  input.value = '';
+  input.click();
+}
+async function handleCameraFile(file) {
+  const index = activeCameraPartIndex;
+  activeCameraPartIndex = -1;
+  if (!file || index < 0 || !parts[index]) return;
+  uploadBusy = true;
+  setCameraBusy(index, true);
+  setCameraStatus(index, 'Uploading…');
+  try {
+    // If no active session exists, authenticate interactively now, immediately after the camera result.
+    if (!oneDriveAccount) await connectOneDrive();
+    if (!oneDriveAccount) throw new Error('OneDrive connection was not completed.');
+    await uploadPhotoToOneDrive(file, parts[index].pn);
+    setCameraStatus(index, '✓ Saved to OneDrive', 'ok');
+    showToast(`Picture saved for ${parts[index].pn}`, false);
+  } catch (err) {
+    setCameraStatus(index, 'Upload failed', 'bad');
+    setStatus('oneDriveStatus', err.message || 'Picture upload failed.', 'bad');
+  } finally {
+    setCameraBusy(index, false);
+    uploadBusy = false;
+  }
+}
+
+$('oneDriveSaveBtn').onclick = saveOneDriveSettings;
+$('oneDriveConnectBtn').onclick = connectOneDrive;
+$('oneDriveDisconnectBtn').onclick = disconnectOneDrive;
+$('cameraInput').addEventListener('change', e => handleCameraFile(e.target.files?.[0] || null));
+
+loadOneDriveSettings();
+if (window.msal?.PublicClientApplication) {
+  try {
+    const app = ensureMsal();
+    const accounts = app.getAllAccounts();
+    if (accounts.length) {
+      oneDriveAccount = accounts[0];
+      $('oneDriveAccount').textContent = oneDriveAccount.username || 'Connected';
+    }
+  } catch {}
+}
+
+/* =========================================================
    RENDERING
    ========================================================= */
 
@@ -818,8 +1126,10 @@ function partHtml(p, i) {
         <div class="pn">${pn}</div>
         <div class="pblock-foot">
           <span class="count-badge">${count > 0 ? count + " pics" : "No range"}</span>
-          <button class="icon danger remove" aria-label="Remove ${pn}">×</button>
+          <button type="button" class="icon camera" aria-label="Take picture for ${pn}" title="Take picture">📷</button>
+          <button type="button" class="icon danger remove" aria-label="Remove ${pn}">×</button>
         </div>
+        <div class="camera-status" data-camera-status></div>
       </div>
 
       <div class="range-col">
@@ -1463,6 +1773,9 @@ list.addEventListener("click", e => {
   const numBtn = e.target.closest(".num-field");
   if (numBtn && p) { openPicker(index, numBtn.dataset.field); return; }
 
+  const cameraBtn = e.target.closest(".camera");
+  if (cameraBtn && p) { openCameraForPart(index); return; }
+
   const removeBtn = e.target.closest(".remove");
   if (removeBtn && p) {
     const pn = p.pn;
@@ -1684,7 +1997,7 @@ list.addEventListener("pointerdown", e => {
   if (e.pointerType === "mouse" && e.button !== 0) return;
   if (drag || picker.idx >= 0) return;
   const blk = e.target.closest(".pblock");
-  if (!blk || e.target.closest(".remove, .place")) return;
+  if (!blk || e.target.closest(".remove, .place, .camera")) return;
   cancelPress();
   press = {
     id: e.pointerId, x: e.clientX, y: e.clientY, blk,
