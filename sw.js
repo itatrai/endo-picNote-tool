@@ -1,6 +1,6 @@
 /* Service worker – offline support for Picture Range Tool.
    Bump VERSION whenever you want every device to drop its old cache. */
-const VERSION = "v2";
+const VERSION = "v0.13";
 const CACHE   = `picture-range-${VERSION}`;
 const SHELL   = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 const LIB_HOST = "cdn.jsdelivr.net";          // the Excel (SheetJS) library
