@@ -1,6 +1,6 @@
 {
-  "name": "Picture Range Tool",
-  "short_name": "Picture Ranges",
+  "name": "Endo PicNote",
+  "short_name": "Endo PicNote",
   "description": "Assign start and end picture numbers to part numbers.",
   "start_url": "./index.html",
   "display": "standalone",

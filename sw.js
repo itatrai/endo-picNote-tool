@@ -1,4 +1,4 @@
-/* Service worker – offline support for Picture Range Tool.
+/* Service worker – offline support for Endo PicNote.
    Bump VERSION whenever you want every device to drop its old cache. */
 const VERSION = "v0.13";
 const CACHE   = `picture-range-${VERSION}`;

@@ -7,10 +7,10 @@
 <meta name="theme-color" content="#0f172a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Picture Ranges">
+<meta name="apple-mobile-web-app-title" content="Endo PicNote">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Picture Range Tool</title>
-<!-- Picture Range Tool v0.13 -->
+<title>Endo PicNote</title>
+<!-- Endo PicNote v0.13 -->
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -588,7 +588,7 @@
 
 <header>
   <div class="header-top">
-    <h1>📷 Picture Range Tool</h1>
+    <h1 id="appTitle">📷 Endo PicNote</h1>
     <span id="headerBadge" class="count-badge">0 Parts</span>
   </div>
   <nav class="nav-tabs" role="tablist">
@@ -774,7 +774,9 @@
 /* =========================================================
    CONFIG & STORAGE KEY (PRESERVED)
    ========================================================= */
-
+const APP_VERSION = "v0.13";
+document.getElementById("appTitle").textContent =
+  `📷 Endo PicNote ${APP_VERSION}`;
 const STORAGE_KEY = "pictureRangeTool.v1";
 const CSV_SEP_KEY = "pictureRangeTool.csvSep";
 const FIRST_PICTURE_KEY = "pictureRangeTool.firstFullPicture";
