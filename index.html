@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Endo PicNote">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Endo PicNote</title>
-<!-- Endo PicNote v0.13 -->
+<!-- Endo PicNote v0.15 -->
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -581,6 +581,15 @@
   .photo-item .ph-pn { font-weight: 700; word-break: break-all; }
   .photo-item .ph-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .photo-item button { min-height: 36px; padding: 6px 12px; font-size: 14px; flex: none; }
+
+  /* --- IMPORT COLUMN CHOICE --- */
+  .import-choice { margin-top: 10px; padding: 12px; background: var(--field); border: 1px solid var(--line); border-radius: var(--radius-md); }
+  .choice-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; line-height: 1.4; }
+  .choice-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  button.choice-btn { width: 100%; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; text-align: left; background: var(--card); border: 1px solid var(--line); }
+  button.choice-btn .ch-type { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
+  button.choice-btn .ch-head { font-size: 16px; font-weight: 700; word-break: break-word; }
+  button.choice-btn .ch-sub { font-size: 12px; font-weight: 500; color: var(--muted); word-break: break-word; }
 </style>
 </head>
 
@@ -624,7 +633,10 @@
       <div class="summary-bar">
         <span id="summaryText">0 Parts loaded</span>
       </div>
-      <p class="hint" style="margin:-2px 4px 6px;">Hold a part block and drag it to reorder, or type a new # to move it. Start/End pictures stay in place and the pic count of each part follows its position. Slide the switch between the two blocks to the right to lock a part to its pictures.</p>
+      <details class="hint" style="margin:-2px 4px 10px;">
+        <summary>How to reorder and lock parts</summary>
+        <p class="hint">Hold a part block and drag it to reorder, or type a new # to move it. Start/End pictures stay in place and the pic count of each part follows its position. Slide the switch between the two blocks to the right to lock a part to its pictures.</p>
+      </details>
 
       <div id="list"></div>
       <div id="empty" class="empty">No part numbers loaded.<br>Add one above or go to <b>Import & Export</b>.</div>
@@ -647,9 +659,17 @@
         <summary>Supported Headers</summary>
         <p class="hint">
           Automatically detects columns named Part Number, Part No, PN, OEM PN, Numéro de pièce, Référence pièce, etc.
+          Also detects <b>Part Name</b> (Part Name, Customer Part Name, Cust Part Name) and <b>Sika ID</b> (Sika ID, Sika PN, Sika Name, Name, Title).
+          At least one of these is needed. If several are found, you choose which column fills the list.
+          Sika ID values are cleaned on import: any "=" is removed and a trailing file extension (e.g. ".CATPart") is stripped.
         </p>
       </details>
       <div id="fileStatus" class="status" role="status"></div>
+      <div id="importChoice" class="import-choice" hidden>
+        <div class="choice-title">More than one usable column was found. Which one should fill the list?</div>
+        <div id="importChoiceList" class="choice-list"></div>
+        <button id="importChoiceCancel" type="button" style="width:100%;">Cancel import</button>
+      </div>
       <div id="duplicateActions" class="toolbar" style="margin-top:10px;" hidden>
         <button id="removeDuplicatesBtn" class="primary" type="button">Remove all duplicates</button>
         <button id="keepDuplicatesBtn" type="button">Keep duplicates</button>
@@ -774,7 +794,7 @@
 /* =========================================================
    CONFIG & STORAGE KEY (PRESERVED)
    ========================================================= */
-const APP_VERSION = "v0.13";
+const APP_VERSION = "v0.15";
 document.getElementById("appTitle").textContent =
   `📷 Endo PicNote ${APP_VERSION}`;
 const STORAGE_KEY = "pictureRangeTool.v1";
@@ -1940,6 +1960,7 @@ $("addForm").addEventListener("submit", e => {
 });
 
 $("sampleBtn").onclick = () => {
+  hideImportChoice();
   withUndo("Sample loaded", () => {
     parts = [
       { pn: "ABC123", start: "", end: "", _cnt: 2 },
@@ -2061,12 +2082,34 @@ const PN_HEADER_PATTERNS = [
 
 const SHORT_PN_RANK = 70;
 const EXCLUDED_PN_QUALIFIERS = ["sym", "symmetric", "symmetrical", "symetrique"];
+/* Extra header types (v0.14). A sheet only needs ONE of the three types.
+   Part Name: matched at the end of the header (e.g. "Customer Part Name").
+   Sika ID:   sikaid / sikapn / sikaname at the end of the header, plus the
+              generic "name" / "title", which must match the WHOLE header
+              (so "Part Name" is never mistaken for a Sika ID). */
+const PART_NAME_PATTERNS = [
+  ["customerpartname", 100],
+  ["custpartname",      98],
+  ["partname",          95]
+];
+const SIKA_ID_PATTERNS = [
+  ["sikaid",   100],
+  ["sikapn",    98],
+  ["sikaname",  96]
+];
+const SIKA_ID_EXACT = [
+  ["name",  80],
+  ["title", 80]
+];
+const HEADER_TYPE_ORDER = ["pn", "name", "sika"];
+const HEADER_TYPE_LABELS = { pn: "Part Number", name: "Part Name", sika: "Sika ID" };
+/* Only add a bonus to the header-row score; they are not columns to import */
 const SECONDARY_HEADER_KEYWORDS = new Map([
-  ["name", 3], ["title", 3], ["description", 3],
-  ["designation", 3], ["libelle", 3], ["nom", 3]
+  ["description", 3], ["designation", 3], ["libelle", 3], ["nom", 3]
 ]);
 
-function getPNHeaderMatch(value) {
+/* Returns { type, original, normalized, pattern, matchRank } or null */
+function getHeaderMatch(value) {
   const original   = String(value ?? "").trim();
   const normalized = normalizeHeader(original);
   const tokens     = tokenizeHeader(original);
@@ -2074,31 +2117,45 @@ function getPNHeaderMatch(value) {
 
   if (EXCLUDED_PN_QUALIFIERS.some(q => tokens.includes(q) || normalized.endsWith(q))) return null;
 
+  // Sika ID first, so "Sika PN" is not taken for a plain "PN" header
+  for (const [pattern, matchRank] of SIKA_ID_PATTERNS) {
+    if (normalized.endsWith(pattern)) return { type: "sika", original, normalized, pattern, matchRank };
+  }
+
   for (const [pattern, matchRank] of PN_HEADER_PATTERNS) {
-    if (normalized.endsWith(pattern)) return { original, normalized, pattern, matchRank };
+    if (normalized.endsWith(pattern)) return { type: "pn", original, normalized, pattern, matchRank };
+  }
+
+  for (const [pattern, matchRank] of PART_NAME_PATTERNS) {
+    if (normalized.endsWith(pattern)) return { type: "name", original, normalized, pattern, matchRank };
   }
 
   if (tokens.length && tokens[tokens.length - 1] === "pn") {
-    return { original, normalized, pattern: "pn", matchRank: SHORT_PN_RANK };
+    return { type: "pn", original, normalized, pattern: "pn", matchRank: SHORT_PN_RANK };
+  }
+
+  for (const [pattern, matchRank] of SIKA_ID_EXACT) {
+    if (normalized === pattern) return { type: "sika", original, normalized, pattern, matchRank };
   }
   return null;
 }
 
-function findPNColumnInfo(headers) {
-  if (!Array.isArray(headers)) return null;
-  let best = null;
+/* Best column of each type found in one header row, in a fixed order */
+function findHeaderColumns(headers) {
+  if (!Array.isArray(headers)) return [];
+  const best = {};
   headers.forEach((h, i) => {
-    const m = getPNHeaderMatch(h);
-    if (m && (!best || m.matchRank > best.matchRank)) best = { columnIndex: i, ...m };
+    const m = getHeaderMatch(h);
+    if (m && (!best[m.type] || m.matchRank > best[m.type].matchRank)) best[m.type] = { columnIndex: i, ...m };
   });
-  return best;
+  return HEADER_TYPE_ORDER.map(t => best[t]).filter(Boolean);
 }
 
-function countPNValuesBelow(rows, headerIndex, pnColumn, lookAhead = HEADER_DATA_LOOKAHEAD) {
+function countValuesBelow(rows, headerIndex, column, lookAhead = HEADER_DATA_LOOKAHEAD) {
   const end = Math.min(rows.length, headerIndex + 1 + lookAhead);
   let count = 0;
   for (let r = headerIndex + 1; r < end; r++) {
-    if (normalizePN((rows[r] || [])[pnColumn])) count++;
+    if (normalizePN((rows[r] || [])[column])) count++;
   }
   return count;
 }
@@ -2107,12 +2164,16 @@ function scoreHeaderCandidate(rows, rowIndex) {
   const row = rows[rowIndex];
   if (!Array.isArray(row)) return null;
 
-  const pnMatch = findPNColumnInfo(row);
-  if (!pnMatch) return null;
+  const columns = findHeaderColumns(row);
+  if (!columns.length) return null;
 
+  const bestRank = Math.max(...columns.map(c => c.matchRank));
   let score = 10;
-  if (pnMatch.matchRank >= 90) score += 2;
-  else if (pnMatch.matchRank >= 80) score += 1;
+  if (bestRank >= 90) score += 2;
+  else if (bestRank >= 80) score += 1;
+
+  // Every additional header type found in the same row makes it a better header row
+  score += (columns.length - 1) * 3;
 
   const matchedKeywords = [];
   const seen = new Set();
@@ -2125,13 +2186,13 @@ function scoreHeaderCandidate(rows, rowIndex) {
     }
   }
 
-  const dataValues = countPNValuesBelow(rows, rowIndex, pnMatch.columnIndex);
+  columns.forEach(c => { c.dataValues = countValuesBelow(rows, rowIndex, c.columnIndex); });
+  const dataValues = Math.max(...columns.map(c => c.dataValues));
   score += dataValues;
 
   return {
     headerIndex: rowIndex,
-    pnColumn: pnMatch.columnIndex,
-    pnMatch, score, dataValues, matchedKeywords,
+    columns, bestRank, score, dataValues, matchedKeywords,
     headers: row
   };
 }
@@ -2139,7 +2200,7 @@ function scoreHeaderCandidate(rows, rowIndex) {
 function compareCandidates(a, b) {
   return (a.score - b.score)
       || (a.dataValues - b.dataValues)
-      || (a.pnMatch.matchRank - b.pnMatch.matchRank);
+      || (a.bestRank - b.bestRank);
 }
 
 function findBestHeader(rows, maxRows = MAX_HEADER_SEARCH_ROWS) {
@@ -2188,8 +2249,11 @@ function findBestDelimiter(sample) {
     const headerResult = findBestHeader(rows);
     if (!headerResult) continue;
 
-    const cell = String(headerResult.headers[headerResult.pnColumn]);
-    if (DELIMITER_CANDIDATES.some(d => d !== delimiter && cell.includes(d))) continue;
+    const badCell = headerResult.columns.some(c => {
+      const cell = String(headerResult.headers[c.columnIndex]);
+      return DELIMITER_CANDIDATES.some(d => d !== delimiter && cell.includes(d));
+    });
+    if (badCell) continue;
 
     const candidate = { delimiter, headerResult, columnCount: headerResult.headers.length };
     if (!best) { best = candidate; continue; }
@@ -2209,10 +2273,22 @@ async function readTextFile(file) {
   catch { return new TextDecoder("windows-1252").decode(buf); }
 }
 
-function extractPartNumbers(rows, { headerIndex, pnColumn }) {
+/* Sika ID values (v0.15): remove every "=" and strip a trailing file extension.
+   The extension must contain at least one letter (so "12.5" is left alone) and
+   is only removed when something remains in front of it. */
+const FILE_EXT_RE = /\.(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{1,10}$/;
+function cleanSikaId(value) {
+  let s = normalizePN(value).replace(/=/g, "").trim();
+  const noExt = s.replace(FILE_EXT_RE, "").trim();
+  if (noExt) s = noExt;
+  return s;
+}
+
+function extractPartNumbers(rows, headerIndex, columnIndex, type) {
   const out = [];
   for (let r = headerIndex + 1; r < rows.length; r++) {
-    const pn = normalizePN((rows[r] || [])[pnColumn]);
+    const raw = (rows[r] || [])[columnIndex];
+    const pn = type === "sika" ? cleanSikaId(raw) : normalizePN(raw);
     if (pn) out.push({ pn, start: "", end: "" });
   }
   return out;
@@ -2287,11 +2363,71 @@ $("keepDuplicatesBtn").onclick = () => {
   setStatus("fileStatus", "Duplicates kept. They will still be flagged during final validation/export.", "warn");
 };
 
+/* ---- Column choice (shown when more than one header type is found) ---- */
+let pendingImport = null;   // { rows, headerResult }
+
+function hideImportChoice() {
+  pendingImport = null;
+  $("importChoice").hidden = true;
+  $("importChoiceList").innerHTML = "";
+}
+
+function showImportChoice(result) {
+  const { rows, headerResult } = result;
+  pendingImport = { rows, headerResult };
+  $("importChoiceList").innerHTML = headerResult.columns.map((c, i) => {
+    const values = extractPartNumbers(rows, headerResult.headerIndex, c.columnIndex, c.type).map(x => x.pn);
+    const sample = values.slice(0, 3).join(", ");
+    return `<button type="button" class="choice-btn" data-col="${i}">
+      <span class="ch-type">${escapeHtml(HEADER_TYPE_LABELS[c.type])}</span>
+      <span class="ch-head">${escapeHtml(c.original)}</span>
+      <span class="ch-sub">${values.length} value${values.length === 1 ? "" : "s"}${sample ? " · e.g. " + escapeHtml(sample) : ""}</span>
+    </button>`;
+  }).join("");
+  $("importChoice").hidden = false;
+  setStatus("fileStatus", `Found ${headerResult.columns.length} usable columns – choose the one to import.`, "warn");
+}
+
+function finishImport(rows, headerResult, column) {
+  const imported = extractPartNumbers(rows, headerResult.headerIndex, column.columnIndex, column.type);
+  if (!imported.length) throw new Error(`Found the "${column.original}" column, but no values below it.`);
+
+  withUndo(`Imported ${imported.length} part number(s)`, () => {
+    parts = imported;
+    if (firstPictureReady()) seedRangesFromFirstPicture();
+  });
+
+  const duplicateInfo = getDuplicateInfo(imported);
+  if (duplicateInfo.duplicateRows > 0) {
+    setStatus("fileStatus", `Imported ${imported.length} part numbers from "${column.original}". ⚠ Found ${duplicateInfo.duplicateRows} duplicate entr${duplicateInfo.duplicateRows === 1 ? "y" : "ies"} across ${duplicateInfo.duplicatePartNumbers} repeated part number${duplicateInfo.duplicatePartNumbers === 1 ? "" : "s"}. Remove all duplicates?`, "warn");
+    $("duplicateActions").hidden = false;
+  } else {
+    hideDuplicateActions();
+    setStatus("fileStatus", `Successfully imported ${imported.length} part numbers from "${column.original}". No duplicates found.`, "ok");
+  }
+}
+
+$("importChoiceList").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-col]");
+  if (!btn || !pendingImport) return;
+  const { rows, headerResult } = pendingImport;
+  const column = headerResult.columns[+btn.dataset.col];
+  hideImportChoice();
+  try { finishImport(rows, headerResult, column); }
+  catch (err) { setStatus("fileStatus", err.message || "Import failed.", "bad"); }
+});
+
+$("importChoiceCancel").onclick = () => {
+  hideImportChoice();
+  setStatus("fileStatus", "Import cancelled. The current list was not changed.", "warn");
+};
+
 $("fileInput").addEventListener("change", async e => {
   const file = e.target.files[0];
   if (!file) return;
 
   hideDuplicateActions();
+  hideImportChoice();
   setStatus("fileStatus", "Analysing file…");
 
   try {
@@ -2299,25 +2435,11 @@ $("fileInput").addEventListener("change", async e => {
     const isText = name.endsWith(".csv") || name.endsWith(".txt");
     const result = isText ? await analyseCsv(file) : await analyseWorkbook(file);
 
-    if (!result) throw new Error("No recognized Part Number column found.");
+    if (!result) throw new Error("No recognized header found (Part Number, Part Name or Sika ID).");
 
     const { headerResult, rows } = result;
-    const imported = extractPartNumbers(rows, headerResult);
-    if (!imported.length) throw new Error("Found column, but no part numbers.");
-
-    withUndo(`Imported ${imported.length} part number(s)`, () => {
-      parts = imported;
-      if (firstPictureReady()) seedRangesFromFirstPicture();
-    });
-
-    const duplicateInfo = getDuplicateInfo(imported);
-    if (duplicateInfo.duplicateRows > 0) {
-      setStatus("fileStatus", `Imported ${imported.length} part numbers. ⚠ Found ${duplicateInfo.duplicateRows} duplicate entr${duplicateInfo.duplicateRows === 1 ? "y" : "ies"} across ${duplicateInfo.duplicatePartNumbers} repeated part number${duplicateInfo.duplicatePartNumbers === 1 ? "" : "s"}. Remove all duplicates?`, "warn");
-      $("duplicateActions").hidden = false;
-    } else {
-      hideDuplicateActions();
-      setStatus("fileStatus", `Successfully imported ${imported.length} part numbers. No duplicates found.`, "ok");
-    }
+    if (headerResult.columns.length > 1) showImportChoice(result);
+    else finishImport(rows, headerResult, headerResult.columns[0]);
   } catch (err) {
     setStatus("fileStatus", err.message || "Import failed.", "bad");
   }
