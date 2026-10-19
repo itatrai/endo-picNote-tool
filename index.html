@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Endo PicNote">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Endo PicNote</title>
-<!-- Endo PicNote v0.15 -->
+<!-- Endo PicNote v0.16 -->
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -663,7 +663,7 @@
           Automatically detects columns named Part Number, Part No, PN, OEM PN, Numéro de pièce, Référence pièce, etc.
           Also detects <b>Part Name</b> (Part Name, Customer Part Name, Cust Part Name) and <b>Sika ID</b> (Sika ID, Sika PN, Sika Name, Name, Title).
           At least one of these is needed. If several are found, you choose which column fills the list.
-          Sika ID values are cleaned on import: any "=" is removed and a trailing file extension (e.g. ".CATPart") is stripped.
+          Imported values are cleaned: any "=" is removed (also a quote in front of it, e.g. '=ABC). Sika ID values also lose a trailing file extension (e.g. ".CATPart").
         </p>
       </details>
       <div id="fileStatus" class="status" role="status"></div>
@@ -731,7 +731,7 @@
 </main>
 
 <!-- STICKY ACTION BAR -->
-<div class="sticky-actions">
+<div id="stickyActions" class="sticky-actions" hidden>
   <div class="sticky-inner">
     <button id="exportBtn" class="primary">Export</button>
   </div>
@@ -796,7 +796,7 @@
 /* =========================================================
    CONFIG & STORAGE KEY (PRESERVED)
    ========================================================= */
-const APP_VERSION = "v0.15";
+const APP_VERSION = "v0.16";
 document.getElementById("appTitle").textContent =
   `📷 Endo PicNote ${APP_VERSION}`;
 const STORAGE_KEY = "pictureRangeTool.v1";
@@ -862,6 +862,7 @@ document.querySelectorAll(".nav-tab").forEach(tab => {
     document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
     tab.classList.add("active");
     $(tab.dataset.tab).classList.add("active");
+    $("stickyActions").hidden = tab.dataset.tab !== "tab-tools";   // Export bar: page 2 only
   };
 });
 
@@ -1863,7 +1864,8 @@ function updateDrag() {
 function autoScroll() {
   if (!drag) return;
   const topEdge = document.querySelector("header").getBoundingClientRect().bottom + 30;
-  const botEdge = document.querySelector(".sticky-actions").getBoundingClientRect().top - 30;
+  const bar = $("stickyActions");
+  const botEdge = (bar.hidden ? window.innerHeight - 40 : bar.getBoundingClientRect().top) - 30;
   const y = drag.clientY;
   let v = 0;
   if (y < topEdge) v = -Math.min(18, (topEdge - y) / 4 + 3);
@@ -2288,12 +2290,27 @@ async function readTextFile(file) {
   catch { return new TextDecoder("windows-1252").decode(buf); }
 }
 
-/* Sika ID values (v0.15): remove every "=" and strip a trailing file extension.
+/* Imported values (v0.16): every "=" is removed from ALL imported columns. A quote
+   sitting directly in front of an "=" (e.g. '=ABC from Excel) is removed too, and
+   quotes wrapping the whole value after that (="ABC") are unwrapped. */
+const EQ_LEAD_RE = /^(['"‘’“”]*)=+(['"‘’“”]*)([\s\S]*)$/;
+function stripEquals(value) {
+  let s = normalizePN(value);
+  if (!s.includes("=")) return s;
+  const m = s.match(EQ_LEAD_RE);
+  if (m) {                                   // =ABC  '=ABC  ="ABC"  '='ABC'
+    s = m[3];
+    if (m[1] || m[2]) s = s.replace(/['"‘’“”]+$/, "");   // closing quote(s)
+  }
+  return s.replace(/=/g, "").trim();         // any "=" left inside the text
+}
+
+/* Sika ID values (v0.15): additionally strip a trailing file extension.
    The extension must contain at least one letter (so "12.5" is left alone) and
    is only removed when something remains in front of it. */
 const FILE_EXT_RE = /\.(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{1,10}$/;
 function cleanSikaId(value) {
-  let s = normalizePN(value).replace(/=/g, "").trim();
+  let s = stripEquals(value);
   const noExt = s.replace(FILE_EXT_RE, "").trim();
   if (noExt) s = noExt;
   return s;
@@ -2303,7 +2320,7 @@ function extractPartNumbers(rows, headerIndex, columnIndex, type) {
   const out = [];
   for (let r = headerIndex + 1; r < rows.length; r++) {
     const raw = (rows[r] || [])[columnIndex];
-    const pn = type === "sika" ? cleanSikaId(raw) : normalizePN(raw);
+    const pn = type === "sika" ? cleanSikaId(raw) : stripEquals(raw);
     if (pn) out.push({ pn, start: "", end: "" });
   }
   return out;
@@ -2613,8 +2630,13 @@ async function updatePhotosUI() {
       <button type="button" class="save-part" data-pn="${escapeHtml(pn)}">Save</button>
     </div>`).join("");
 
-  $("photoSaveAllBtn").disabled = fresh === 0;
-  $("photoZipBtn").disabled = fresh === 0;
+  // New photos waiting: the buttons save only those. Nothing new: they stay active
+  // and save ALL photos again (e.g. files were removed from OneDrive).
+  const noNew = fresh === 0 && items.length > 0;
+  $("photoSaveAllBtn").textContent = noNew ? "Save all photos to Files / OneDrive" : "Save new photos to Files / OneDrive";
+  $("photoZipBtn").textContent     = noNew ? "Save all photos as ZIP (folder per part)" : "Save new photos as ZIP (folder per part)";
+  $("photoSaveAllBtn").disabled = items.length === 0;
+  $("photoZipBtn").disabled = items.length === 0;
   $("photoDeleteBtn").hidden = saved === 0;
   $("photoClearAllBtn").disabled = items.length === 0;
 }
@@ -2701,8 +2723,14 @@ async function savePhotosZip(items) {
   }
 }
 
-$("photoSaveAllBtn").onclick = async () => savePhotoItems((await photoStore.all()).filter(i => !i.saved));
-$("photoZipBtn").onclick     = async () => savePhotosZip((await photoStore.all()).filter(i => !i.saved));
+/* New photos if there are any, otherwise all photos again */
+async function photosToSave() {
+  const all = await photoStore.all();
+  const fresh = all.filter(i => !i.saved);
+  return fresh.length ? fresh : all;
+}
+$("photoSaveAllBtn").onclick = async () => savePhotoItems(await photosToSave());
+$("photoZipBtn").onclick     = async () => savePhotosZip(await photosToSave());
 $("photoList").addEventListener("click", async e => {
   const b = e.target.closest(".save-part");
   if (!b) return;
