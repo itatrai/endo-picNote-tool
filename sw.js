@@ -1,6 +1,6 @@
 /* Service worker – offline support for Endo PicNote.
    Bump VERSION whenever you want every device to drop its old cache. */
-const VERSION = "v0.16";
+const VERSION = "v0.17";
 const CACHE   = `picture-range-${VERSION}`;
 const SHELL   = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 const LIB_HOST = "cdn.jsdelivr.net";          // the Excel (SheetJS) library

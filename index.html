@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Endo PicNote">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Endo PicNote</title>
-<!-- Endo PicNote v0.16 -->
+<!-- Endo PicNote v0.17 -->
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -796,7 +796,7 @@
 /* =========================================================
    CONFIG & STORAGE KEY (PRESERVED)
    ========================================================= */
-const APP_VERSION = "v0.16";
+const APP_VERSION = "v0.17";
 document.getElementById("appTitle").textContent =
   `📷 Endo PicNote ${APP_VERSION}`;
 const STORAGE_KEY = "pictureRangeTool.v1";
@@ -2558,6 +2558,8 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 /* ---- Taking a picture ---- */
 function photoSizeSetting() { return parseInt(store.get(PHOTO_SIZE_KEY) || "", 10) || 0; }
 
+/* v0.17: photos are kept in the app as taken (original) and resized every time they
+   are saved, using the Photo size chosen at that moment. */
 async function resizePhoto(file) {
   const max = photoSizeSetting();
   if (!max) return file;
@@ -2590,7 +2592,7 @@ $("camInput").addEventListener("change", async e => {
   const pn = camPn;
   camPn = null;
   if (!file || !pn) return;
-  const blob = await resizePhoto(file);
+  const blob = file;   // keep the original; the size setting is applied when saving
   await photoStore.add({ pn, name: `${cleanName(pn)}_${stamp()}.${photoExt(blob, file)}`, blob, ts: Date.now(), saved: false });
   await updatePhotosUI();
   showToast(`Photo kept for ${pn} (${pendingByPn.get(pn) || 1} not yet saved)`, false);
@@ -2651,8 +2653,25 @@ async function shareFiles(files) {
   return "downloaded";
 }
 
-async function savePhotoItems(items) {
-  if (!items.length) { showToast("No photos to save.", false); return; }
+/* Copies of the stored items, resized to the current Photo size setting.
+   The stored originals are never changed. */
+async function prepareItems(items) {
+  const out = [];
+  for (const it of items) {
+    const blob = await resizePhoto(it.blob);
+    const base = it.name.replace(/\.[^.]*$/, "");
+    out.push({ ...it, blob, name: `${base}.${photoExt(blob, { name: it.name })}` });
+  }
+  return out;
+}
+
+async function savePhotoItems(stored) {
+  if (!stored.length) { showToast("No photos to save.", false); return; }
+  setStatus("photoMsg", "Preparing photos…");
+  let items;
+  try { items = await prepareItems(stored); }
+  catch (err) { setStatus("photoMsg", err.message || "Could not prepare the photos.", "bad"); return; }
+  setStatus("photoMsg", "");
   const files = items.map(i => new File([i.blob], i.name, { type: i.blob.type || "image/jpeg" }));
   const r = await shareFiles(files);
   if (r === "cancelled") return;
@@ -2706,10 +2725,11 @@ async function buildZip(items) {
   return new Blob([...body, ...central, end.buffer], { type: "application/zip" });
 }
 
-async function savePhotosZip(items) {
-  if (!items.length) { showToast("No photos to save.", false); return; }
+async function savePhotosZip(stored) {
+  if (!stored.length) { showToast("No photos to save.", false); return; }
   setStatus("photoMsg", "Building ZIP…");
   try {
+    const items = await prepareItems(stored);
     const zip = await buildZip(items);
     const file = new File([zip], `picture_notes_${stamp()}.zip`, { type: "application/zip" });
     const r = await shareFiles([file]);
